@@ -1,0 +1,151 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+# Test that the test runner can properly construct sources with keys
+# and report on key information in plans
+
+cat
+(defsource x ([int32 int64 int32] [[0] [1]]))
+----
+ok
+
+build format=types
+(map (get x) [4145])
+----
+%0 =
+| Get x (u0)
+| | types = (Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+| Map 4145
+| | types = (Int32?, Int64?, Int32?, Int64)
+| | keys = ((#0), (#1))
+
+# Run tests where a transform occuring depends on the input keys.
+
+## Joins of the same input to itself on the key of the input can be converted
+## into a project
+
+opt format=types
+(join [(get x) (get x)] [[#0 #3]])
+----
+%0 =
+| Get x (u0)
+| | types = (Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+| Project (#0..=#2, #0..=#2)
+| | types = (Int32?, Int64?, Int32?, Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+
+steps format=types
+(join [(get x) (get x)] [[#0 #3] [#2 #5]])
+----
+----
+%0 =
+| Get x (u0)
+| | types = (Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+
+%1 =
+| Get x (u0)
+| | types = (Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+
+%2 =
+| Join %0 %1 (= #0 #3) (= #2 #5)
+| | implementation = Unimplemented
+| | types = (Int32?, Int64?, Int32?, Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+
+====
+No change: TopKElision, NonNullRequirements { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }
+====
+Applied Fixpoint { transforms: [FuseAndCollapse { transforms: [ProjectionExtraction, ProjectionLifting { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, Map, Negate, Filter, FlatMapToMap, Project, Join, TopK, InlineLet { inline_mfp: false, recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, Reduce, Union, UnionBranchCancellation, UpdateLet { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, RedundantJoin { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, FoldConstants { limit: Some(10000) }] }], limit: 100 }:
+%0 =
+| Get x (u0)
+| | types = (Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+| Project (#0..=#2, #0..=#2)
+| | types = (Int32?, Int64?, Int32?, Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+
+====
+No change: Fixpoint { transforms: [PredicatePushdown { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, NonNullable, ColumnKnowledge { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, Demand { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, FuseAndCollapse { transforms: [ProjectionExtraction, ProjectionLifting { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, Map, Negate, Filter, FlatMapToMap, Project, Join, TopK, InlineLet { inline_mfp: false, recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, Reduce, Union, UnionBranchCancellation, UpdateLet { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, RedundantJoin { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, FoldConstants { limit: Some(10000) }] }], limit: 100 }, Fixpoint { transforms: [ReductionPushdown, ReduceElision, LiteralLifting { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, RelationCSE, InlineLet { inline_mfp: false, recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, UpdateLet { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, FuseAndCollapse { transforms: [ProjectionExtraction, ProjectionLifting { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, Map, Negate, Filter, FlatMapToMap, Project, Join, TopK, InlineLet { inline_mfp: false, recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, Reduce, Union, UnionBranchCancellation, UpdateLet { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, RedundantJoin { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, FoldConstants { limit: Some(10000) }] }], limit: 100 }, ProjectionPushdown, UpdateLet { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, Map, Fixpoint { transforms: [Join, RedundantJoin { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, Project, Union, UnionBranchCancellation, RelationCSE, InlineLet { inline_mfp: true, recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, FoldConstants { limit: Some(10000) }], limit: 100 }, Fixpoint { transforms: [JoinImplementation { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, ColumnKnowledge { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, FoldConstants { limit: Some(10000) }, Demand { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, LiteralLifting { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }], limit: 100 }, CanonicalizeMfp
+====
+Applied RelationCSE:
+%0 = Let l0 =
+| Get x (u0)
+| | types = (Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+
+%1 = Let l1 =
+| Get %0 (l0)
+| | types = (Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+| Project (#0..=#2, #0..=#2)
+| | types = (Int32?, Int64?, Int32?, Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+
+%2 =
+| Get %1 (l1)
+| | types = (Int32?, Int64?, Int32?, Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+
+====
+Applied InlineLet { inline_mfp: false, recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }:
+%0 =
+| Get x (u0)
+| | types = (Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+| Project (#0..=#2, #0..=#2)
+| | types = (Int32?, Int64?, Int32?, Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+
+====
+No change: UpdateLet { recursion_guard: RecursionGuard { depth: RefCell { value: 0 }, limit: 2048 } }, FoldConstants { limit: Some(10000) }
+====
+Final:
+%0 =
+| Get x (u0)
+| | types = (Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+| Project (#0..=#2, #0..=#2)
+| | types = (Int32?, Int64?, Int32?, Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+
+====
+----
+----
+
+opt format=types
+(join [(get x) (get x)] [[#2 #5]])
+----
+----
+%0 =
+| Get x (u0)
+| | types = (Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+| ArrangeBy (#2)
+| | types = (Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+
+%1 =
+| Get x (u0)
+| | types = (Int32?, Int64?, Int32?)
+| | keys = ((#0), (#1))
+
+%2 =
+| Join %0 %1 (= #2 #5)
+| | implementation = Differential %1 %0.(#2)
+| | types = (Int32?, Int64?, Int32?, Int32?, Int64?, Int32?)
+| | keys = ()
+| Project (#0..=#4, #2)
+| | types = (Int32?, Int64?, Int32?, Int32?, Int64?, Int32?)
+| | keys = ()
+----
+----

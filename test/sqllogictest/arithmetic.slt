@@ -1,0 +1,1054 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+mode cockroach
+
+# TODO: The types supported by mod are SMALLINT, BIGINT, INTEGER, DECIMAL, and NUMERIC.
+# Tests all types?
+
+### mod ###
+
+# positive dividend and divisor
+
+query I
+SELECT mod(34, 7)
+----
+6
+
+query I
+SELECT mod(35, 7)
+----
+0
+
+query I
+SELECT mod(4, 4)
+----
+0
+
+query I
+SELECT mod(7, 11)
+----
+7
+
+query R
+SELECT mod(4.3, 2.1)
+----
+0.1
+
+query R
+SELECT mod(4, 2.1)
+----
+1.9
+
+query R
+SELECT mod(0.34, 1.1)
+----
+0.34
+
+query R
+SELECT mod(4.2, 2.1)
+----
+0
+
+# negative dividend
+query I
+SELECT mod(-3234, 73)
+----
+-22
+
+query I
+SELECT mod(-100, 10)
+----
+0
+
+query I
+SELECT mod(-5, 5)
+----
+0
+
+query I
+SELECT mod(-237, 1100)
+----
+-237
+
+query R
+SELECT mod(-2.254, 2.2)
+----
+-0.054
+
+query R
+SELECT mod(-4, 1.75)
+----
+-0.5
+
+query R
+SELECT mod(-0.3234, 200)
+----
+-0.3234
+
+query R
+SELECT mod(-7.5, 1.5)
+----
+0
+
+# negative divisor
+
+query I
+SELECT mod(23, -5)
+----
+3
+
+query I
+SELECT mod(20, -2)
+----
+0
+
+query I
+SELECT mod(29, -29)
+----
+0
+
+query I
+SELECT mod(7, -11)
+----
+7
+
+query R
+SELECT mod(8.5, -4.6)
+----
+3.9
+
+query R
+SELECT mod(30, -11.9)
+----
+6.2
+
+query R
+SELECT mod(0.0019, -0.013)
+----
+0.0019
+
+query R
+SELECT mod(14.4, -0.002)
+----
+0
+
+# negative dividend and negative divisor
+
+query I
+SELECT mod(-121, -17)
+----
+-2
+
+query I
+SELECT mod(-64, -8)
+----
+0
+
+query I
+SELECT mod(-344, -344)
+----
+0
+
+query I
+SELECT mod(-13, -123)
+----
+-13
+
+query R
+SELECT mod(-5.6, -2.3)
+----
+-1
+
+query R
+SELECT mod(-10.4, -2)
+----
+-0.4
+
+query R
+SELECT mod(-2.45, -45.6)
+----
+-2.45
+
+query R
+SELECT mod(-12.15, -4.05)
+----
+0
+
+# special values: 0/NULL dividend and/or divisor
+
+query I
+SELECT mod(0, 4)
+----
+0
+
+query R
+SELECT mod(0.000, 2)
+----
+0
+
+query R
+SELECT mod(0, 1.23)
+----
+0
+
+query error division by zero
+SELECT mod(4, 0.0)
+
+query error division by zero
+SELECT mod(0, 0)
+
+query I
+SELECT mod(0, NULL)
+----
+NULL
+
+query I
+SELECT mod(NULL, 0)
+----
+NULL
+
+query I
+SELECT mod(-5, NULL)
+----
+NULL
+
+query I
+SELECT mod(NULL, 0.45)
+----
+NULL
+
+query error division by zero
+SELECT 1 % 0
+
+query error division by zero
+SELECT 1 % 0.0
+
+query error division by zero
+SELECT 1.0 % 0
+
+query error division by zero
+SELECT 1.0 % 0.0
+
+query error division by zero
+SELECT 1 % CAST (0.0 AS float)
+
+query error division by zero
+SELECT 1 / 0
+
+query error division by zero
+SELECT 1 / 0.0
+
+query error division by zero
+SELECT 1.0 / 0
+
+query error division by zero
+SELECT 1.0 / 0.0
+
+query error division by zero
+SELECT 1 / CAST (0.0 AS float)
+
+query I
+SELECT 1 + CAST ('5' AS double precision)
+----
+6
+
+query TT
+SELECT CAST ('+Inf' AS double precision), CAST ('inf' AS double precision)
+----
+inf inf
+
+query T
+SELECT CAST (CAST (1.1 AS double precision) AS text)
+----
+1.1
+
+query T
+SELECT CAST (CAST (1 as int) AS text)
+----
+1
+
+query TT
+SELECT FALSE::text, TRUE::text
+----
+false  true
+
+query TTTTT
+SELECT 1::smallint::text, 1::bigint::text, 1.0::text, 1.0::float::text, 1.0::double::text
+----
+1  1  1  1  1
+
+query TTTTT
+SELECT (-1)::smallint::text, (-1)::bigint::text, (-1.0)::text, (-1.0)::float::text, (-1.0)::double::text
+----
+-1  -1  -1  -1  -1
+
+query TTT
+SELECT 1.1::text, 1.1::float::text, 1.1::double::text
+----
+1.1  1.1  1.1
+
+query R
+SELECT round(CAST (1.5678 AS float))
+----
+2
+
+query R
+SELECT round(CAST (-1.4678 AS float))
+----
+-1
+
+query R
+SELECT round(CAST (1.5678 AS double precision))
+----
+2
+
+query R
+SELECT round(CAST (-1.4678 AS double precision))
+----
+-1
+
+statement ok
+CREATE TABLE nums (
+  n integer
+)
+
+statement ok
+INSERT INTO nums VALUES (4)
+
+query R
+SELECT round(1.5678, CAST ((SELECT n FROM nums) AS integer))
+----
+1.5678
+
+statement ok
+DELETE FROM nums
+
+query R
+SELECT floor(1.5678)
+----
+1
+
+query R
+SELECT round(1.5678, 3)
+----
+1.568
+
+query R
+SELECT round(1.5678, 2)
+----
+1.57
+
+query R
+SELECT round(1.5678, 1)
+----
+1.6
+
+query R
+SELECT round(1.5678, 0)
+----
+2
+
+query R
+SELECT round(1.5678, 7)
+----
+1.5678
+
+query R
+SELECT round(515, 0)
+----
+515
+
+query R
+SELECT round(515, 1)
+----
+515
+
+query R
+SELECT round(515, -1)
+----
+520
+
+query R
+SELECT round(515, -2)
+----
+500
+
+query RRR
+SELECT round(CAST (515 AS decimal), -3), round(515, -3), round(CAST (515 AS decimal(4, 0)), -3)
+----
+1000  1000  1000
+
+query R
+SELECT round(748.58, -4)
+----
+0
+
+query RR
+SELECT round(123.9994, 3), round(123.9995, 3)
+----
+123.999  124
+
+query RR
+SELECT round(123.4545, 2), round(123.45, -2)
+----
+123.45  100
+
+query R
+SELECT round(150.75, 0)
+----
+151
+
+query R
+SELECT round(NULL)
+----
+NULL
+
+# This needs an explicit cast while we develop the new decimal type in parallel.
+query R
+SELECT round(NULL::decimal, 2)
+----
+NULL
+
+query R
+SELECT round(1.567, NULL)
+----
+NULL
+
+# This needs an explicit cast while we develop the new decimal type in parallel.
+query R
+SELECT round(NULL::decimal, NULL)
+----
+NULL
+
+statement ok
+INSERT INTO nums VALUES (NULL)
+
+query R
+SELECT round((SELECT * FROM nums))
+----
+NULL
+
+query R
+SELECT round((SELECT * FROM nums), 2)
+----
+NULL
+
+query R
+SELECT round(2, (SELECT * FROM nums))
+----
+NULL
+
+query R
+SELECT round((SELECT * FROM nums), (SELECT * FROM nums))
+----
+NULL
+
+statement ok
+DROP TABLE nums
+
+statement ok
+CREATE TABLE nums (
+  n float
+)
+
+statement ok
+INSERT INTO nums VALUES (NULL)
+
+query R
+SELECT round((SELECT * FROM nums));
+----
+NULL
+
+query error Cannot call function round\(double precision, integer\): arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT round((SELECT * FROM nums), 2)
+
+query error Cannot call function round\(double precision, double precision\): arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT round((SELECT * FROM nums), (SELECT * FROM nums))
+
+query error Cannot call function round\(numeric, double precision\): arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT round(5.0, (SELECT * FROM nums))
+
+query R
+SELECT round(5.0, CAST ((SELECT * FROM nums) AS integer))
+----
+NULL
+
+query error Cannot call function round\(double precision, integer\): arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT round(CAST (5.0 AS double precision), 3)
+
+query error Cannot call function round\(double precision, integer\): arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT round(CAST (5.0 AS float), 3)
+
+query error Cannot call function round\(boolean, integer\): arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT round(true, 3)
+
+query error
+SELECT round(true)
+
+query error Cannot call function round\(double precision, numeric\): arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT round(CAST (5.0 AS float), 3.0)
+
+query error Cannot call function round\(double precision, double precision\): arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT round(CAST (5.0 AS float), CAST (3.0 AS float))
+
+query I
+SELECT 2147483646+1
+----
+2147483647
+
+query error numeric field overflow
+SELECT 2147483647+1
+
+statement error numeric field overflow
+SELECT 1073741824*2
+
+query I
+SELECT 9223372036854775806::bigint+1::bigint
+----
+9223372036854775807
+
+query error numeric field overflow
+SELECT 9223372036854775807::bigint+1::bigint
+
+query error numeric field overflow
+SELECT 9223372036854775807::bigint-(-1)::bigint
+
+query error numeric field overflow
+SELECT (-6734743351254754)::bigint * (-99783359317598)::bigint
+
+query error numeric field overflow
+SELECT (CAST(-6734743351254754 AS bigint) * CAST(-99783359317598 AS bigint))
+
+### overflow and underflow checking ###
+
+statement ok
+SELECT '1e300'::float
+
+query error value out of range: overflow
+SELECT '1e300'::float * '1e200'::float
+
+query R
+SELECT 'Inf'::float * '1e200'::float
+----
+inf
+
+query R
+SELECT '1e200'::float * '-Inf'::float
+----
+-inf
+
+query error value out of range: underflow
+SELECT '1e-300'::float * '1e-200'::float
+
+query R
+SELECT '0.0'::float * '1e-200'::float
+----
+0
+
+query R
+SELECT '1e-300'::float * '0.0'::float
+----
+0
+
+query error value out of range: overflow
+SELECT '1e308'::float + '1e308'::float
+
+query R
+SELECT 'Inf'::float + '1e308'::float
+----
+inf
+
+query R
+SELECT '1e308'::float + '-Inf'::float
+----
+-inf
+
+query error value out of range: overflow
+SELECT '-1e308'::float - '1e308'::float
+
+query R
+SELECT 'Inf'::float - '1e308'::float
+----
+inf
+
+query R
+SELECT '1e308'::float - '-Inf'::float
+----
+inf
+
+query error division by zero
+SELECT '1e-300'::float / '0.0'::float
+
+query error value out of range: overflow
+SELECT '1e300'::float / '1e-30'::float
+
+query R
+SELECT 'Inf'::float / '1e-30'::float
+----
+inf
+
+query error value out of range: underflow
+SELECT '1e-300'::float / '1e30'::float
+
+query R
+SELECT '1e-300'::float / 'Inf'::float
+----
+0
+
+query R
+SELECT '0.0'::float / 'Inf'::float
+----
+0
+
+statement ok
+SELECT '3e38'::float4
+
+query error value out of range: overflow
+SELECT '1e30'::float4 * '1e10'::float4
+
+query R
+SELECT 'Inf'::float4 * '1e10'::float4
+----
+inf
+
+query R
+SELECT '1e30'::float4 * '-Inf'::float4
+----
+-inf
+
+query error value out of range: underflow
+SELECT '1e-30'::float4 * '1e-20'::float4
+
+query R
+SELECT '0.0'::float4 * '1e-20'::float4
+----
+0
+
+query R
+SELECT '1e-30'::float4 * '0.0'::float4
+----
+0
+
+query error value out of range: overflow
+SELECT '3e38'::float4 + '3e38'::float4
+
+query R
+SELECT 'Inf'::float4 + '3e38'::float4
+----
+inf
+
+query R
+SELECT '3e38'::float4 + '-Inf'::float4
+----
+-inf
+
+query error value out of range: overflow
+SELECT '-3e38'::float4 - '3e38'::float4
+
+query R
+SELECT 'Inf'::float4 - '3e38'::float4
+----
+inf
+
+query R
+SELECT '3e38'::float4 - '-Inf'::float4
+----
+inf
+
+query error division by zero
+SELECT '1e-30'::float4 / '0.0'::float4
+
+query error value out of range: overflow
+SELECT '1e30'::float4 / '1e-20'::float4
+
+query R
+SELECT 'Inf'::float4 / '1e-20'::float4
+----
+inf
+
+query error value out of range: underflow
+SELECT '1e-30'::float4 / '1e20'::float4
+
+query R
+SELECT '1e-30'::float4 / 'Inf'::float4
+----
+0
+
+query R
+SELECT '0.0'::float4 / 'Inf'::float4
+----
+0
+
+### bitwise operators ###
+
+# dummy table and data needed for tests
+
+statement ok
+DROP TABLE IF EXISTS nums
+
+statement ok
+CREATE TABLE nums (
+  x1 int2,
+  x2 int2,
+  x3 int2,
+  y1 int4,
+  y2 int4,
+  y3 int4,
+  z1 int8,
+  z2 int8,
+  z3 int8
+)
+
+statement ok
+INSERT INTO nums VALUES (11, 12, 13, 21, 22, 23, 31, 32, 33)
+
+# negation
+
+query IIIII
+SELECT ~0, ~1, ~65535, ~2147483647, ~9223372036854775807
+----
+-1 -2 -65536 -2147483648 -9223372036854775808
+
+# bitwise and
+
+query IIIII
+SELECT
+    3 & 4,
+    7 & 4,
+    7 & 14,
+    1342579021 & 1035032143,
+    2309456347094635094 & 4321056356463245221
+----
+0 4 6 268435533 2307057198754714116
+
+# bitwise or
+
+query IIIII
+SELECT
+    3 | 4,
+    7 | 4,
+    7 | 14,
+    1342579021 | 1035032143,
+    2309456347094635094 | 4321056356463245221
+----
+7 7 15 2109175631 4323455504803166199
+
+# bitwise xor
+
+query IIIII
+SELECT
+    3 # 4,
+    7 # 4,
+    7 # 14,
+    1342579021 # 1035032143,
+    2309456347094635094 # 4321056356463245221
+----
+7 3 9 1840740098 2016398306048452083
+
+# bitwise left shift
+
+query IIII
+SELECT
+  no_bits,
+  1::int2 << no_bits as r2,
+  1::int4 << no_bits as r4,
+  1::int8 << no_bits as r8
+FROM
+  (VALUES
+    (-65), (-64), (-63),
+    (-49), (-48), (-47),
+    (-33), (-32), (-31),
+    (-17), (-16), (-15),
+    (-1),  ( 0 ), ( +1),
+    (+15), (+16), (+17),
+    (+31), (+32), (+33),
+    (+47), (+48), (+49),
+    (+63), (+64), (+65)
+  ) as params(no_bits)
+ORDER by
+  no_bits
+----
+-65        0   -2147483648   -9223372036854775808
+-64        1             1                      1
+-63        2             2                      2
+-49   -32768         32768                  32768
+-48        0         65536                  65536
+-47        0        131072                 131072
+-33        0   -2147483648             2147483648
+-32        1             1             4294967296
+-31        2             2             8589934592
+-17   -32768         32768        140737488355328
+-16        0         65536        281474976710656
+-15        0        131072        562949953421312
+ -1        0   -2147483648   -9223372036854775808
+  0        1             1                      1
+  1        2             2                      2
+ 15   -32768         32768                  32768
+ 16        0         65536                  65536
+ 17        0        131072                 131072
+ 31        0   -2147483648             2147483648
+ 32        1             1             4294967296
+ 33        2             2             8589934592
+ 47   -32768         32768        140737488355328
+ 48        0         65536        281474976710656
+ 49        0        131072        562949953421312
+ 63        0   -2147483648   -9223372036854775808
+ 64        1             1                      1
+ 65        2             2                      2
+
+# bitwise right shift
+
+query IIII
+SELECT
+  no_bits,
+  -32767::int2               >> no_bits as r2,
+  -2147483647::int4          >> no_bits as r4,
+  -9223372036854775807::int8 >> no_bits as r8
+FROM
+  (VALUES
+    (-65), (-64), (-63),
+    (-49), (-48), (-47),
+    (-33), (-32), (-31),
+    (-17), (-16), (-15),
+    (-1),  ( 0 ), ( +1),
+    (+15), (+16), (+17),
+    (+31), (+32), (+33),
+    (+47), (+48), (+49),
+    (+63), (+64), (+65)
+  ) as params(no_bits)
+ORDER by
+  no_bits
+----
+-65       -1            -1                     -1
+-64   -32767   -2147483647   -9223372036854775807
+-63   -16384   -1073741824   -4611686018427387904
+-49       -1        -65536       -281474976710656
+-48       -1        -32768       -140737488355328
+-47       -1        -16384        -70368744177664
+-33       -1            -1            -4294967296
+-32   -32767   -2147483647            -2147483648
+-31   -16384   -1073741824            -1073741824
+-17       -1        -65536                 -65536
+-16       -1        -32768                 -32768
+-15       -1        -16384                 -16384
+ -1       -1            -1                     -1
+  0   -32767   -2147483647   -9223372036854775807
+  1   -16384   -1073741824   -4611686018427387904
+ 15       -1        -65536       -281474976710656
+ 16       -1        -32768       -140737488355328
+ 17       -1        -16384        -70368744177664
+ 31       -1            -1            -4294967296
+ 32   -32767   -2147483647            -2147483648
+ 33   -16384   -1073741824            -1073741824
+ 47       -1        -65536                 -65536
+ 48       -1        -32768                 -32768
+ 49       -1        -16384                 -16384
+ 63       -1            -1                     -1
+ 64   -32767   -2147483647   -9223372036854775807
+ 65   -16384   -1073741824   -4611686018427387904
+
+# precedence between bitwise operators
+
+query III
+SELECT
+    5 >> 1  << 3  as implicit_l,
+   (5 >> 1) << 3  as explicit_l,
+    5 >> (1 << 3) as explicit_r
+----
+16 16 0
+
+query III
+SELECT
+    5 << 1  >> 3  as implicit_l,
+   (5 << 1) >> 3  as explicit_l,
+    5 << (1 >> 3) as explicit_r
+----
+1 1 5
+
+query T multiline
+EXPLAIN SELECT
+  x1 >> x2 << x3 as r1,
+  y1 << y2 >> y3 as r2
+FROM nums
+----
+Source materialize.public.nums (u3):
+| Project (#0..=#5)
+
+Query:
+%0 =
+| Get materialize.public.nums (u3)
+| Map ((#0 >> i16toi32(#1)) << i16toi32(#2)), ((#3 << #4) >> #5)
+| Project (#9, #10)
+
+EOF
+
+# precedence between bitwise operators and '&'
+
+query III
+SELECT
+    5 >> 1  & 12  as implicit_l,
+   (5 >> 1) & 12  as explicit_l,
+    5 >> (1 & 12) as explicit_r
+----
+0 0 5
+
+query III
+SELECT
+    5 << 1  & 12  as implicit_l,
+   (5 << 1) & 12  as explicit_l,
+    5 << (1 & 12) as explicit_r
+----
+8 8 5
+
+query T multiline
+EXPLAIN SELECT
+  x1 >> x2 & x3 as r1,
+  y1 << y2 & y3 as r2
+FROM nums
+----
+Source materialize.public.nums (u3):
+| Project (#0..=#5)
+
+Query:
+%0 =
+| Get materialize.public.nums (u3)
+| Map ((#0 >> i16toi32(#1)) & #2), ((#3 << #4) & #5)
+| Project (#9, #10)
+
+EOF
+
+# precedence between '&' and '|'
+
+query III
+SELECT
+   0  &  0  |  1  as implicit_l,
+  (0  &  0) |  1  as explicit_l,
+   0  & (0  |  1) as explicit_r
+----
+1 1 0
+
+query III
+SELECT
+   1  |  0  &  0  as implicit_l,
+  (1  |  0) &  0  as explicit_l,
+   1  | (0  &  0) as explicit_r
+----
+0 0 1
+
+query T multiline
+EXPLAIN SELECT
+  x1 & x2 | x3 as r1,
+  y1 & y2 | y3 as r2,
+  z1 & z2 | z3 as r3,
+  x1 & y2 | z3 as r4
+FROM nums
+----
+Source materialize.public.nums (u3):
+| Project (#0..=#8)
+
+Query:
+%0 =
+| Get materialize.public.nums (u3)
+| Map ((#0 & #1) | #2), ((#3 & #4) | #5), ((#6 & #7) | #8), (i32toi64((i16toi32(#0) & #4)) | #8)
+| Project (#9..=#12)
+
+EOF
+
+# precedence between '&' and '#'
+
+query III
+SELECT
+   0  &  0  #  1  as implicit_l,
+  (0  &  0) #  1  as explicit_l,
+   0  & (0  #  1) as explicit_r
+----
+1 1 0
+
+query III
+SELECT
+   1  #  0  &  0  as implicit_l,
+  (1  #  0) &  0  as explicit_l,
+   1  # (0  &  0) as explicit_r
+----
+0 0 1
+
+query T multiline
+EXPLAIN SELECT
+  x1 # x2 & x3 as r1,
+  y1 # y2 & y3 as r2,
+  z1 # z2 & z3 as r3,
+  x1 # y2 & z3 as r4
+FROM nums
+----
+Source materialize.public.nums (u3):
+| Project (#0..=#8)
+
+Query:
+%0 =
+| Get materialize.public.nums (u3)
+| Map ((#0 # #1) & #2), ((#3 # #4) & #5), ((#6 # #7) & #8), (i32toi64((i16toi32(#0) # #4)) & #8)
+| Project (#9..=#12)
+
+EOF
+
+# precedence between '|' and '#'
+
+query III
+SELECT
+   1  |  0  #  1  as implicit_l,
+  (1  |  0) #  1  as explicit_l,
+   1  | (0  #  1) as explicit_r
+----
+0 0 1
+
+query III
+SELECT
+   1  #  0  |  1  as implicit_l,
+  (1  #  0) |  1  as explicit_l,
+   1  # (0  |  1) as explicit_r
+----
+1 1 0
+
+query T multiline
+EXPLAIN SELECT
+  x1 # x2 | x3 as r1,
+  y1 # y2 | y3 as r2,
+  z1 # z2 | z3 as r3,
+  x1 # y2 | z3 as r4
+FROM nums
+----
+Source materialize.public.nums (u3):
+| Project (#0..=#8)
+
+Query:
+%0 =
+| Get materialize.public.nums (u3)
+| Map ((#0 # #1) | #2), ((#3 # #4) | #5), ((#6 # #7) | #8), (i32toi64((i16toi32(#0) # #4)) | #8)
+| Project (#9..=#12)
+
+EOF
+
+# precedence between '~' and ("|", "&")
+
+query IIIIII
+SELECT
+   ~1 & 0  as def_and, ~(1 & 0)  as l_prec_and, (~1) & 0  as h_prec_and,
+   ~0 | 1  as def_or , ~(0 | 1)  as l_prec_or , (~0) | 1  as h_prec_or
+----
+0 -1 0 -1 -2 -1
+
+# precedence between '~' and ('+', '-')
+
+query IIIIII
+SELECT
+   ~1 + 1  as def_add, ~(1 + 1)  as l_prec_add, (~1) + 1  as h_prec_add,
+   ~1 - 2  as def_sub, ~(1 - 2)  as l_prec_sub, (~1) - 2  as h_prec_sub
+----
+-3 -3 -1 0 0 -4

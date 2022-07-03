@@ -1,0 +1,103 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+query R
+SELECT 1.4::int
+----
+1
+
+query R
+SELECT 1.5::int
+----
+2
+
+query R
+SELECT 1.4::real::int
+----
+1
+
+query R
+SELECT 1.5::real::int
+----
+2
+
+query R
+SELECT 1.4::float::int
+----
+1
+
+query R
+SELECT 1.5::float::int
+----
+2
+
+query R
+SELECT 1.4::bigint
+----
+1
+
+query R
+SELECT 1.5::bigint
+----
+2
+
+query R
+SELECT 1.4::real::bigint
+----
+1
+
+query R
+SELECT 1.5::real::bigint
+----
+2
+
+query R
+SELECT 1.4::float::bigint
+----
+1
+
+query R
+SELECT 1.5::float::bigint
+----
+2
+
+# 🔬 Custom types
+# TODO(sploiselle): fix return type to indicate custom type
+
+statement ok
+CREATE TYPE int4_list AS LIST (element_type=int4)
+
+statement ok
+CREATE TYPE int4_list_list AS LIST (element_type=int4_list)
+
+statement ok
+CREATE TYPE int4_list_too AS LIST (element_type=int4)
+
+statement ok
+CREATE TYPE int4_list_list_too AS LIST (element_type=int4_list_too)
+
+query T
+SELECT pg_typeof('{1}'::int4 list::int4_list)
+----
+int4_list
+
+query T
+SELECT pg_typeof('{1}'::int4_list::int4 list)
+----
+integer list
+
+query T
+SELECT pg_typeof('{1}'::int4_list_list::int4_list_list_too)
+----
+int4_list_list_too
+
+query T
+SELECT pg_typeof('{1}'::int4_list_list_too::int4_list_list)
+----
+int4_list_list

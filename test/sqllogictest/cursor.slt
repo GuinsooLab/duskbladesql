@@ -1,0 +1,93 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+mode cockroach
+
+statement ok
+BEGIN
+
+statement ok
+DECLARE c CURSOR FOR VALUES (1), (2), (3)
+
+query I
+FETCH c
+----
+1
+
+query I
+FETCH 2 c
+----
+2
+3
+
+query I
+FETCH c
+----
+
+query I
+FETCH c
+----
+
+statement ok
+COMMIT
+
+statement ok
+CREATE VIEW v AS VALUES ('a', 'b'), ('c', 'd'), ('e', 'f'), ('g', 'h')
+----
+
+query IITT
+TAIL v
+----
+18446744073709551615  1  a  b
+18446744073709551615  1  c  d
+18446744073709551615  1  e  f
+18446744073709551615  1  g  h
+
+statement ok
+BEGIN
+
+statement ok
+DECLARE c CURSOR FOR TAIL v
+
+query IITT
+FETCH c
+----
+18446744073709551615  1  a  b
+
+query IITT
+FETCH 2 c WITH (TIMEOUT = '10s')
+----
+18446744073709551615  1  c  d
+18446744073709551615  1  e  f
+
+query IITT
+FETCH 2 c WITH (TIMEOUT = '1s')
+----
+18446744073709551615  1  g  h
+
+query IITT
+FETCH c WITH (TIMEOUT = '1s')
+----
+
+# Test some FETCH timeout errors. The actual timeout functionality is
+# tested elsewhere.
+statement error timeout out of range
+FETCH c WITH (TIMEOUT = '-1s')
+
+statement ok
+ROLLBACK
+
+statement ok
+BEGIN
+
+statement ok
+DECLARE c CURSOR FOR TAIL v
+
+statement error timeout out of range
+FETCH c WITH (TIMEOUT = '25h')

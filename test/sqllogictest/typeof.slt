@@ -1,0 +1,95 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+query error could not determine data type of parameter \$1
+SELECT pg_typeof($1)
+
+query T
+SELECT pg_typeof('1')
+----
+unknown
+
+query T
+SELECT pg_typeof(text '1')
+----
+text
+
+query T
+SELECT pg_typeof(1)
+----
+integer
+
+query T
+SELECT pg_typeof(1.0)
+----
+numeric
+
+# Custom types
+
+statement ok
+CREATE TYPE int4_list AS LIST (element_type=int4)
+
+statement ok
+CREATE TYPE int4_list_list AS LIST (element_type=int4_list)
+
+statement ok
+CREATE TYPE composite AS (a int, b text, c float8);
+
+query T
+SELECT pg_typeof('{1}'::int4 list)
+----
+integer list
+
+query T
+SELECT pg_typeof('{1}'::int4_list)
+----
+int4_list
+
+query T
+SELECT pg_typeof('{{1}}'::int4 list list)
+----
+integer list list
+
+query T
+SELECT pg_typeof('{{1}}'::int4_list_list)
+----
+int4_list_list
+
+query T
+SELECT pg_typeof('{{1}}'::int4_list list)
+----
+int4_list list
+
+query T
+SELECT pg_typeof((1,'abc',2.0)::composite);
+----
+composite
+
+statement ok
+CREATE SCHEMA other;
+
+statement ok
+CREATE TYPE other.composite AS (a text, b text, c float8);
+
+query T
+SELECT pg_typeof(ROW('1', '2', 2.0)::composite)
+----
+composite
+
+query T
+SELECT pg_typeof(ROW('1', '2', 2.0)::other.composite)
+----
+other.composite

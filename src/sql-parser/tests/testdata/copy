@@ -1,0 +1,92 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License in the LICENSE file at the
+# root of this repository, or online at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+parse-statement
+COPY t(a, b) FROM STDIN
+----
+COPY t(a, b) FROM STDIN
+=>
+Copy(CopyStatement { relation: Table { name: Name(UnresolvedObjectName([Ident("t")])), columns: [Ident("a"), Ident("b")] }, direction: From, target: Stdin, options: [] })
+
+parse-statement
+COPY t FROM STDIN
+----
+COPY t FROM STDIN
+=>
+Copy(CopyStatement { relation: Table { name: Name(UnresolvedObjectName([Ident("t")])), columns: [] }, direction: From, target: Stdin, options: [] })
+
+parse-statement
+COPY (select 1) TO STDOUT
+----
+COPY (SELECT 1) TO STDOUT
+=>
+Copy(CopyStatement { relation: Select(SelectStatement { query: Query { ctes: [], body: Select(Select { distinct: None, projection: [Expr { expr: Value(Number("1")), alias: None }], from: [], selection: None, group_by: [], having: None, options: [] }), order_by: [], limit: None, offset: None }, as_of: None }), direction: To, target: Stdout, options: [] })
+
+parse-statement
+COPY t(a, b) TO STDOUT
+----
+COPY t(a, b) TO STDOUT
+=>
+Copy(CopyStatement { relation: Table { name: Name(UnresolvedObjectName([Ident("t")])), columns: [Ident("a"), Ident("b")] }, direction: To, target: Stdout, options: [] })
+
+parse-statement
+COPY t TO STDOUT WITH (FORMAT TEXT)
+----
+COPY t TO STDOUT WITH (FORMAT = text)
+=>
+Copy(CopyStatement { relation: Table { name: Name(UnresolvedObjectName([Ident("t")])), columns: [] }, direction: To, target: Stdout, options: [CopyOption { name: Format, value: Some(Ident(Ident("text"))) }] })
+
+parse-statement
+COPY t FROM STDIN WITH (FORMAT CSV, DELIMITER '|')
+----
+COPY t FROM STDIN WITH (FORMAT = csv, DELIMITER = '|')
+=>
+Copy(CopyStatement { relation: Table { name: Name(UnresolvedObjectName([Ident("t")])), columns: [] }, direction: From, target: Stdin, options: [CopyOption { name: Format, value: Some(Ident(Ident("csv"))) }, CopyOption { name: Delimiter, value: Some(Value(String("|"))) }] })
+
+parse-statement
+COPY t TO STDOUT (format = text)
+----
+COPY t TO STDOUT WITH (FORMAT = text)
+=>
+Copy(CopyStatement { relation: Table { name: Name(UnresolvedObjectName([Ident("t")])), columns: [] }, direction: To, target: Stdout, options: [CopyOption { name: Format, value: Some(Ident(Ident("text"))) }] })
+
+parse-statement
+COPY t TO STDOUT ()
+----
+error: Expected one of FORMAT or DELIMITER or NULL or ESCAPE or QUOTE or HEADER, found right parenthesis
+COPY t TO STDOUT ()
+                  ^
+
+parse-statement
+COPY t TO STDIN
+----
+error: Expected STDOUT, found STDIN
+COPY t TO STDIN
+          ^
+
+parse-statement
+COPY (select 1) FROM STDIN
+----
+error: queries not allowed in COPY FROM
+COPY (select 1) FROM STDIN
+                ^
+
+# WITH must be followed by open paren.
+parse-statement
+COPY t TO STDOUT WITH
+----
+error: Expected left parenthesis, found EOF
+COPY t TO STDOUT WITH
+                     ^

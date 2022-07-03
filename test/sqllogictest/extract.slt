@@ -1,0 +1,45 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+mode cockroach
+
+statement ok
+CREATE TABLE data (input text)
+
+statement ok
+INSERT INTO data VALUES
+    ('asdfjkl'), ('foo'), ('asdf'), ('testing,123'),
+    (NULL), ('jkl'), ('some,csv')
+
+query TTT colnames
+SELECT data.*, reg.*
+FROM data, regexp_extract('(asdf)|(?P<foo>jkl)', data.input) reg
+ORDER BY data.input
+----
+input    column1  foo
+asdf     asdf     NULL
+asdfjkl  asdf     NULL
+jkl      NULL     jkl
+
+# TODO(brennan): test that the regex columns have the correct nullability, once
+# they actually do (#1685).
+
+query TTT colnames
+SELECT data.*, csv.* FROM data, csv_extract(2, data.input) csv
+ORDER BY data.input
+----
+input        column1  column2
+some,csv     some     csv
+testing,123  testing  123
+
+query error Cannot call function csv_extract\(integer, text\): csv_extract number of columns must be a positive integer literal
+SELECT * FROM data, (VALUES (2)) ncols, csv_extract(ncols.column1, data.input)
+
+query error Cannot call function csv_extract\(integer, text\): csv_extract number of columns must be a positive integer literal
+SELECT * FROM data, csv_extract((SELECT 2), data.input)

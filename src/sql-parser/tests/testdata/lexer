@@ -1,0 +1,205 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License in the LICENSE file at the
+# root of this repository, or online at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Tests that primary exercise the lexer. Since the lexer isn't public API,
+# we don't bother testing it directly, but test it via the parser.
+
+# Comments.
+parse-statement roundtrip
+SELECT
+-- this is a comment
+1
+----
+SELECT 1
+
+parse-statement roundtrip
+SELECT /*** this * is ***/ 1 /* a /** nested */ comment */, 2
+----
+SELECT 1, 2
+
+parse-statement roundtrip
+SELECT /* blah blah blah
+----
+error: unterminated multiline comment
+SELECT /* blah blah blah
+       ^
+
+parse-statement roundtrip
+SELECT @@/*
+----
+error: unterminated multiline comment
+SELECT @@/*
+         ^
+
+# String adjacency.
+
+parse-statement roundtrip
+SELECT 'foo'
+
+'bar'
+
+
+
+'baz'
+----
+SELECT 'foobarbaz'
+
+parse-statement roundtrip
+SELECT 'foo'  'bar'
+----
+error: Expected end of statement, found string literal "bar"
+SELECT 'foo'  'bar'
+              ^
+
+parse-statement roundtrip
+SELECT e'foo'
+e'bar'
+----
+error: Expected end of statement, found string literal "bar"
+e'bar'
+^
+
+parse-statement roundtrip
+SELECT e'\u2713'
+'\u2713'
+----
+SELECT '✓✓'
+
+# Escape string literals.
+
+parse-scalar
+e'a\z\8\b\n\f\r\t\u2713\U0001F47B'
+----
+Value(String("az8\u{8}\n\u{c}\r\t✓👻"))
+
+parse-scalar
+e'\018'
+----
+error: octal escapes are not supported
+e'\018'
+  ^
+
+parse-scalar
+e'\x1fg'
+----
+error: hexadecimal escapes are not supported
+e'\x1fg'
+  ^
+
+# Dollar string literals.
+
+parse-statement roundtrip
+SELECT $$Postgre's SQL$$, $eOf$Postgre's SQL$eOf$, end
+----
+SELECT 'Postgre''s SQL', 'Postgre''s SQL', end
+
+parse-statement roundtrip
+SELECT $$POST
+----
+error: unterminated dollar-quoted string
+SELECT $$POST
+       ^
+
+parse-statement roundtrip
+SELECT $EOF$PostgreSQL$$eof$$
+----
+error: unterminated dollar-quoted string
+SELECT $EOF$PostgreSQL$$eof$$
+       ^
+
+parse-statement roundtrip
+SELECT $$$$
+----
+SELECT ''
+
+# Numeric literals
+parse-scalar
+10
+----
+Value(Number("10"))
+
+parse-scalar
+10E10
+----
+Value(Number("10E10"))
+
+parse-scalar
+10E-10
+----
+Value(Number("10E-10"))
+
+parse-scalar
+10e-10
+----
+Value(Number("10E-10"))
+
+parse-scalar
+10e+10
+----
+Value(Number("10E10"))
+
+parse-scalar
+1.1e10
+----
+Value(Number("1.1E10"))
+
+parse-scalar
+1e10.1
+----
+error: extra token after expression
+1e10.1
+    ^
+
+parse-scalar
+1e+
+----
+error: missing required exponent
+1e+
+  ^
+
+parse-scalar
+1e-
+----
+error: missing required exponent
+1e-
+  ^
+
+parse-statement roundtrip
+SELECT 1e
+----
+SELECT 1 AS e
+
+# Test that unexpected unicode characters do not cause the error message to
+# crash when rendered...
+parse-statement
+’hello’
+----
+error: Expected a keyword at the beginning of a statement, found identifier "’hello’"
+’hello’
+^
+
+# ...and that the caret is positioned correctly.
+parse-statement
+SELECT '’fancy quotes inside a string are ok’’’’' AS alias ’
+----
+error: Expected end of statement, found identifier "’"
+SELECT '’fancy quotes inside a string are ok’’’’' AS alias ’
+                                                           ^
+
+# Test that multi-byte Unicode characters are valid identifiers.
+parse-statement roundtrip
+SELECT "😁" AS "😨😨"
+----
+SELECT "😁" AS "😨😨"

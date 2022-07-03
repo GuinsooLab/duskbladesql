@@ -1,0 +1,19 @@
+[package]
+name = "mz-http-util"
+description = "Utilities for running HTTP servers in Materialize."
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.61.0"
+publish = false
+
+[dependencies]
+askama = { version = "0.11.1", default-features = false, features = ["config", "serde-json"] }
+axum = { version = "0.5.9", features = ["headers"] }
+headers = "0.3.7"
+include_dir = "0.7.2"
+mz-ore = { path = "../ore", default-features = false, features = ["metrics"] }
+prometheus = { version = "0.13.1", default-features = false, features = ["process"] }
+
+[package.metadata.cargo-udeps.ignore]
+# Only used in macro generated code
+normal = ["include_dir"]

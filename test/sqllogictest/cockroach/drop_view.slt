@@ -1,0 +1,216 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/drop_view
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+# not supported yet
+halt
+
+mode cockroach
+
+statement ok
+CREATE TABLE a (k STRING PRIMARY KEY, v STRING)
+
+statement ok
+INSERT INTO a VALUES ('a', '1'), ('b', '2'), ('c', '3')
+
+statement ok
+CREATE VIEW b AS SELECT k,v from a
+
+statement ok
+CREATE VIEW c AS SELECT k,v from b
+
+query T
+SHOW TABLES FROM test
+----
+a
+b
+c
+
+statement error cannot drop relation "a" because view "b" depends on it
+DROP TABLE a
+
+statement error pgcode 42809 "b" is not a table
+DROP TABLE b
+
+statement error cannot drop relation "b" because view "c" depends on it
+DROP VIEW b
+
+statement ok
+CREATE VIEW d AS SELECT k,v FROM a
+
+statement ok
+CREATE VIEW diamond AS SELECT count(*) FROM b AS b JOIN d AS d ON b.k = d.k
+
+statement error cannot drop relation "d" because view "diamond" depends on it
+DROP VIEW d
+
+statement ok
+GRANT ALL ON d TO testuser
+
+query T
+SHOW TABLES FROM test
+----
+a
+b
+c
+d
+diamond
+
+user testuser
+
+statement error user testuser does not have DROP privilege on relation diamond
+DROP VIEW diamond
+
+statement error cannot drop relation "d" because view "diamond" depends on it
+DROP VIEW d
+
+user root
+
+statement ok
+CREATE VIEW testuser1 AS SELECT k,v FROM a
+
+statement ok
+CREATE VIEW testuser2 AS SELECT k,v FROM testuser1
+
+statement ok
+CREATE VIEW testuser3 AS SELECT k,v FROM testuser2
+
+statement ok
+GRANT ALL ON testuser1 to testuser
+
+statement ok
+GRANT ALL ON testuser2 to testuser
+
+statement ok
+GRANT ALL ON testuser3 to testuser
+
+query T
+SHOW TABLES FROM test
+----
+a
+b
+c
+d
+diamond
+testuser1
+testuser2
+testuser3
+
+user testuser
+
+statement ok
+DROP VIEW testuser3
+
+query T
+SHOW TABLES FROM test
+----
+d
+testuser1
+testuser2
+
+statement error cannot drop relation "testuser1" because view "testuser2" depends on it
+DROP VIEW testuser1
+
+statement error cannot drop relation "testuser1" because view "testuser2" depends on it
+DROP VIEW testuser1 RESTRICT
+
+statement ok
+DROP VIEW testuser1 CASCADE
+
+query T
+SHOW TABLES FROM test
+----
+d
+
+statement error pgcode 42P01 relation "testuser2" does not exist
+DROP VIEW testuser2
+
+user root
+
+statement ok
+GRANT ALL ON a to testuser
+
+statement ok
+GRANT ALL ON b to testuser
+
+statement ok
+GRANT ALL ON c to testuser
+
+statement ok
+GRANT ALL ON d to testuser
+
+user testuser
+
+statement error user testuser does not have DROP privilege on relation diamond
+DROP TABLE a CASCADE
+
+user root
+
+statement ok
+DROP TABLE a CASCADE
+
+query T
+SHOW TABLES FROM test
+----
+
+statement ok
+CREATE VIEW x AS VALUES (1, 2), (3, 4)
+
+statement ok
+CREATE VIEW y AS SELECT column1, column2 FROM x
+
+statement error cannot drop relation "x" because view "y" depends on it
+DROP VIEW x
+
+statement ok
+DROP VIEW x, y
+
+statement ok
+CREATE VIEW x AS VALUES (1, 2), (3, 4)
+
+statement ok
+CREATE VIEW y AS SELECT column1, column2 FROM x
+
+statement error cannot drop relation "x" because view "y" depends on it
+DROP VIEW x
+
+statement ok
+DROP VIEW y, x
+
+# Ensure that dropping a database works even when views get referred to more=
+# than once. See #15953 for more details.
+statement ok
+CREATE DATABASE a
+
+statement ok
+SET DATABASE=a
+
+statement ok
+CREATE TABLE a (a int);
+
+statement ok
+CREATE TABLE b (b int);
+
+statement ok
+CREATE VIEW v AS SELECT a.a, b.b FROM a CROSS JOIN b
+
+statement ok
+CREATE VIEW u AS SELECT a FROM a UNION SELECT a FROM a
+
+statement ok
+DROP DATABASE a CASCADE

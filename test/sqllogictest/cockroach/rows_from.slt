@@ -1,0 +1,96 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/rows_from
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+# not supported yet
+halt
+
+mode cockroach
+
+query II colnames
+SELECT * FROM ROWS FROM (generate_series(1,2), generate_series(4,8))
+----
+generate_series  generate_series
+1                4
+2                5
+NULL             6
+NULL             7
+NULL             8
+
+query II colnames
+SELECT * FROM ROWS FROM (generate_series(1,4), generate_series(4,5))
+----
+generate_series  generate_series
+1                4
+2                5
+3                NULL
+4                NULL
+
+query II colnames
+SELECT * FROM ROWS FROM (generate_series(1,0), generate_series(1,0))
+----
+generate_series  generate_series
+
+query II colnames
+SELECT * FROM ROWS FROM (generate_series(1,0), generate_series(1,1))
+----
+generate_series  generate_series
+NULL             1
+
+query II colnames
+SELECT * FROM ROWS FROM (generate_series(1,2), greatest(1,2,3,4))
+----
+generate_series  greatest
+1                4
+2                NULL
+
+query IT colnames
+SELECT * FROM ROWS FROM (generate_series(1,2), current_user)
+----
+generate_series  current_user
+1                root
+2                NULL
+
+query TI colnames
+SELECT * FROM ROWS FROM (current_user, generate_series(1,2))
+----
+current_user generate_series
+root         1
+NULL         2
+
+query TT colnames
+SELECT * FROM ROWS FROM (current_user, current_user)
+----
+current_user current_user
+root         root
+
+query III colnames
+SELECT * FROM ROWS FROM (information_schema._pg_expandarray(array[4,5,6]), generate_series(10,15));
+----
+x     n     generate_series
+4     1     10
+5     2     11
+6     3     12
+NULL  NULL  13
+NULL  NULL  14
+NULL  NULL  15
+
+# Regression test for #27389.
+
+statement error pg_get_keywords\(\): set-returning functions must appear at the top level of FROM
+SELECT * FROM ROWS FROM(generate_series(length((pg_get_keywords()).word),10));

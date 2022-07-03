@@ -1,0 +1,309 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+steps:
+  - block: Nightly test selection
+    prompt: |
+      What tests would you like to run? As a convenience, leaving all tests
+      unchecked will run all tests.
+    blocked_state: running
+    fields:
+      - select: Tests
+        key: tests
+        options:
+          - { value: coverage }
+          - { value: kafka-matrix }
+          - { value: kafka-multi-broker }
+          - { value: redpanda-testdrive }
+          - { value: redpanda-testdrive-aarch64 }
+          - { value: upgrade }
+          - { value: limits }
+          - { value: cluster-limits }
+          - { value: limits-instance-size }
+          - { value: cluster-testdrive }
+          - { value: testdrive-workers-1 }
+          - { value: testdrive-workers-32 }
+          - { value: testdrive-partitions-5 }
+          - { value: feature-benchmark-single-node }
+          - { value: feature-benchmark-cluster }
+          - { value: aws-config }
+          - { value: zippy-kafka-sources }
+          - { value: checks-drop-create-default-replica }
+          - { value: checks-restart-computed }
+          - { value: secrets }
+          - { value: unused-deps }
+        multiple: true
+        required: false
+    if: build.source == "ui"
+
+  - id: build-x86_64
+    label: Build x86_64
+    command: bin/ci-builder run stable bin/pyactivate -m ci.test.build x86_64
+    timeout_in_minutes: 60
+    agents:
+      queue: builder-linux-x86_64
+
+  - wait: ~
+
+  - command: bin/ci-builder run stable bin/pyactivate -m ci.nightly.trim_pipeline
+    if: build.source == "ui"
+    agents:
+      queue: linux
+
+  - wait: ~
+
+  - id: feature-benchmark-single-node
+    label: "Feature benchmark (single node)"
+    timeout_in_minutes: 360
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/mzcompose:
+          composition: feature-benchmark
+          args:
+            - --this-nodes
+            - 1
+            - --this-workers
+            - 4
+            - --other-tag
+            - latest
+            - --other-options
+            - --workers 4
+
+  - id: feature-benchmark-cluster
+    label: "Feature benchmark (cluster)"
+    timeout_in_minutes: 360
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/mzcompose:
+          composition: feature-benchmark
+          args:
+            - --this-nodes
+            - 4
+            - --other-tag
+            - latest
+            - --other-options
+            - --workers 4
+
+  - id: coverage
+    label: Code coverage
+    timeout_in_minutes: 240
+    command: bin/ci-builder run nightly bin/pyactivate -m ci.nightly.coverage
+    agents:
+      queue: linux-x86_64
+    skip: Disabled due to persistent OOMs when linking
+
+  - id: kafka-matrix
+    label: Kafka smoke test against previous Kafka versions
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/mzcompose:
+          composition: kafka-matrix
+
+  - id: kafka-multi-broker
+    label: Kafka multi-broker test
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/mzcompose:
+          composition: kafka-multi-broker
+
+  - id: redpanda-testdrive
+    label: ":panda_face: :racing_car: testdrive"
+    timeout_in_minutes: 120
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/scratch-aws-access: ~
+      - ./ci/plugins/mzcompose:
+          composition: testdrive
+          args: [--redpanda, --aws-region=us-east-2]
+
+  - id: redpanda-testdrive-aarch64
+    label: ":panda_face: :racing_car: testdrive aarch64"
+    timeout_in_minutes: 120
+    agents:
+      queue: linux-aarch64
+    plugins:
+      - ./ci/plugins/scratch-aws-access: ~
+      - ./ci/plugins/mzcompose:
+          composition: testdrive
+          args: [--redpanda, --aws-region=us-east-2]
+
+  - id: upgrade
+    label: "Upgrade testing"
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/mzcompose:
+          composition: upgrade
+          args: [--most-recent, "0"]
+
+  - id: limits
+    label: "Product limits"
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/mzcompose:
+          composition: limits
+    timeout_in_minutes: 50
+
+  - id: cluster-limits
+    label: "Cluster Product limits"
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/mzcompose:
+          composition: limits
+          run: cluster
+    timeout_in_minutes: 50
+
+  - id: limits-instance-size
+    label: "Instance size limits"
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/mzcompose:
+          composition: limits
+          run: instance-size
+    timeout_in_minutes: 50
+
+  - id: cluster-testdrive
+    label: "Full testdrive against Cluster"
+    timeout_in_minutes: 120
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/mzcompose:
+          composition: cluster
+          run: nightly
+
+  - id: testdrive-workers-1
+    label: ":racing_car: testdrive with --workers 1"
+    timeout_in_minutes: 120
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/scratch-aws-access: ~
+      - ./ci/plugins/mzcompose:
+          composition: testdrive
+          # TODO(benesch): set --workers=1 again.
+          args: [--aws-region=us-east-2]
+
+  # TODO(benesch): reenable.
+  # - id: testdrive-workers-32
+  #   label: ":racing_car: testdrive with --workers 32"
+  #   depends_on: build-x86_64
+  #   timeout_in_minutes: 120
+  #   plugins:
+  #     - ./ci/plugins/scratch-aws-access: ~
+  #     - ./ci/plugins/mzcompose:
+  #         composition: testdrive
+  #         args: [--aws-region=us-east-2, --workers=32]
+  #   agents:
+  #     queue: linux-x86_64-large
+
+  - id: testdrive-partitions-5
+    label: ":racing_car: testdrive with --kafka-default-partitions 5"
+    timeout_in_minutes: 120
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/scratch-aws-access: ~
+      - ./ci/plugins/mzcompose:
+          composition: testdrive
+          args: [--aws-region=us-east-2, --kafka-default-partitions=5]
+
+  - id: persistence-testdrive
+    label: ":racing_car: testdrive with --persistent-user-tables"
+    timeout_in_minutes: 30
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/scratch-aws-access: ~
+      - ./ci/plugins/mzcompose:
+          composition: testdrive
+          args: [--aws-region=us-east-2, --persistent-user-tables]
+    skip: Persistence tests disabled
+
+  - id: aws-config
+    label: "AWS credentials and role assumption"
+    timeout_in_minutes: 30
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/scratch-aws-access: ~
+      - ./ci/plugins/mzcompose:
+          composition: aws-config
+
+  - id: zippy-kafka-sources
+    label: "Zippy"
+    timeout_in_minutes: 120
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/mzcompose:
+          composition: zippy
+          args: [--scenario=KafkaSources, --actions=1000]
+
+  - id: checks-drop-create-default-replica
+    label: "Checks + DROP/CREATE replica"
+    timeout_in_minutes: 30
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/mzcompose:
+          composition: platform-checks
+          args: [--scenario=DropCreateDefaultReplica]
+
+  - id: checks-restart-computed
+    label: "Checks + restart computed"
+    timeout_in_minutes: 30
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/mzcompose:
+          composition: platform-checks
+          args: [--scenario=RestartComputed]
+
+  - id: secrets
+    label: "Secrets"
+    timeout_in_minutes: 30
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/mzcompose:
+          composition: secrets
+
+  - id: persistence-failpoints
+    label: Persistence failpoints
+    timeout_in_minutes: 30
+    artifact_paths: junit_mzcompose_*.xml
+    agents:
+      queue: linux-x86_64
+    plugins:
+      - ./ci/plugins/mzcompose:
+          composition: persistence
+          run: failpoints
+    skip: Persistence tests disabled
+
+  - id: unused-deps
+    label: Unused dependencies
+    command: bin/ci-builder run nightly bin/unused-deps
+    # inputs:
+    #  - Cargo.lock
+    #  - "**/Cargo.toml"
+    #  - "**/*.rs"
+    timeout_in_minutes: 30
+    # https://github.com/est31/cargo-udeps/issues/103
+    soft_fail: true
+    agents:
+      queue: linux-x86_64

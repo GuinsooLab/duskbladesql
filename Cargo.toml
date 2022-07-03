@@ -1,0 +1,104 @@
+[workspace]
+members = [
+    "src/audit-log",
+    "src/avro-derive",
+    "src/avro",
+    "src/billing-demo",
+    "src/build-info",
+    "src/ccsr",
+    "src/compute",
+    "src/coord",
+    "src/dataflow-bin",
+    "src/dataflow-types",
+    "src/frontegg-auth",
+    "src/expr-test-util",
+    "src/expr",
+    "src/http-util",
+    "src/interchange",
+    "src/kafka-util",
+    "src/kinesis-util",
+    "src/lowertest-derive",
+    "src/environmentd",
+    "src/lowertest",
+    "src/metabase",
+    "src/npm",
+    "src/ore",
+    "src/orchestrator",
+    "src/orchestrator-kubernetes",
+    "src/orchestrator-process",
+    "src/orchestrator-tracing",
+    "src/persist-client",
+    "src/persist-types",
+    "src/persist",
+    "src/pgcopy",
+    "src/pgrepr",
+    "src/pgtest",
+    "src/pgwire",
+    "src/pid-file",
+    "src/postgres-util",
+    "src/prof",
+    "src/proto",
+    "src/repr-test-util",
+    "src/repr",
+    "src/s3-datagen",
+    "src/secrets",
+    "src/secrets-filesystem",
+    "src/secrets-kubernetes",
+    "src/service",
+    "src/sql-parser",
+    "src/sql",
+    "src/sqllogictest",
+    "src/stash",
+    "src/storage",
+    "src/storaged",
+    "src/testdrive",
+    "src/timely-util",
+    "src/transform",
+    "src/walkabout",
+    "test/metabase/smoketest",
+    "test/perf-kinesis",
+    "test/test-util",
+]
+# Use Cargo's new feature resolver, which can handle target-specific features.
+# Explicit opt-in is required even with the 2021 edition because we use a
+# virtual workspace.
+# See: https://blog.rust-lang.org/2021/03/25/Rust-1.51.0.html#cargos-new-feature-resolver
+resolver = "2"
+
+[profile.dev]
+# TODO(gusywnn|benesch): remove this when incremental ice's are improved
+incremental = false
+
+[profile.dev.package]
+# Compile the backtrace crate and its dependencies with all optimizations, even
+# in dev builds, since otherwise backtraces can take 20s+ to symbolize. With
+# optimizations enabled, symbolizing a backtrace takes less than 1s.
+addr2line = { opt-level = 3 }
+adler = { opt-level = 3 }
+backtrace = { opt-level = 3 }
+gimli = { opt-level = 3 }
+miniz_oxide = { opt-level = 3 }
+object = { opt-level = 3 }
+rustc-demangle = { opt-level = 3 }
+
+[profile.release]
+# Emit only the line info tables, not full debug info, in release builds, to
+# substantially reduce the size of the debug info. Line info tables are enough
+# to correctly symbolicate a backtrace, but do not produce an ideal interactive
+# debugger experience. This seems to be the right tradeoff for release builds:
+# it's unlikely we're going to get interactive access to a debugger in
+# production installations, but we still want useful crash reports.
+debug = 1
+
+# Use this section only to change the source of dependencies that might
+# also appear as transitive dependencies of other external dependencies in
+# the dependency graph. For everything else (e.g. rust-postgres, rdkafka,
+# differential-dataflow, proptest, timely) set the `git` sourcce
+# direclty in each dependency entry.
+[patch.crates-io]
+opentelemetry = { git = "https://github.com/MaterializeInc/opentelemetry-rust.git" }
+opentelemetry-otlp = { git = "https://github.com/MaterializeInc/opentelemetry-rust.git" }
+prost = { git = "https://github.com/MaterializeInc/prost.git", branch = "v0.10" }
+prost-build = { git = "https://github.com/MaterializeInc/prost.git", branch = "v0.10" }
+prost-derive = { git = "https://github.com/MaterializeInc/prost.git", branch = "v0.10" }
+prost-types = { git = "https://github.com/MaterializeInc/prost.git", branch = "v0.10" }

@@ -1,0 +1,756 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+mode cockroach
+
+statement ok
+CREATE TABLE nullary ()
+
+statement ok
+CREATE TABLE peeps (
+  peep text
+)
+
+statement ok
+INSERT INTO peeps VALUES ('alice'), ('bob'), ('eve')
+
+statement ok
+CREATE TABLE likes (
+  liker text,
+  likee text
+)
+
+statement ok
+INSERT INTO likes VALUES ('alice', 'bob'), ('bob', 'eve'), ('alice', 'eve')
+
+query TB rowsort
+SELECT peep, EXISTS(
+  SELECT * FROM likes WHERE peep = liker
+) FROM peeps
+----
+alice true
+bob true
+eve false
+
+query TTB rowsort
+SELECT *, EXISTS(
+  SELECT * FROM likes as likes2 WHERE likes.likee = likes2.liker
+) FROM likes
+----
+alice bob true
+alice eve false
+bob eve false
+
+# inner scope shadows outer scope, so `likee` without qualification refers to `likes2.likee`
+query TTB rowsort
+SELECT *, EXISTS(
+  SELECT * FROM likes as likes2 WHERE likee = likes2.liker
+) FROM likes
+----
+alice bob false
+alice eve false
+bob eve false
+
+# similarly, without `as likes2`, `likes.liker` refers to the inner scope
+query TTB rowsort
+SELECT *, EXISTS(
+  SELECT * FROM likes WHERE likee = likes.liker
+) FROM likes
+----
+alice bob false
+alice eve false
+bob eve false
+
+statement error more than one record produced in subquery
+SELECT peep, (
+  SELECT likee FROM likes WHERE liker = peep
+) FROM peeps
+
+statement ok
+CREATE TABLE favorites (peep text, other text)
+
+statement ok
+INSERT INTO favorites VALUES ('alice', 'eve'), ('alice', 'alice'), ('bob', 'bob')
+
+query TTB rowsort
+SELECT
+    liker,
+    likee,
+    likee IN (SELECT other FROM favorites WHERE peep = liker) AS is_favorite
+FROM likes
+----
+alice  bob  false
+bob    eve  false
+alice  eve  true
+
+query TTB rowsort
+SELECT
+    liker,
+    likee,
+    likee NOT IN (SELECT other FROM favorites WHERE peep = liker) AS is_favorite
+FROM likes
+----
+alice  bob  true
+bob    eve  true
+alice  eve  false
+
+statement ok
+CREATE TABLE age (peep text, age int)
+
+statement ok
+INSERT INTO age VALUES ('alice', 103), ('bob', 100), ('eve', 104)
+
+statement error more than one record produced in subquery
+SELECT peeps.peep, (
+  SELECT age FROM likes, age WHERE peeps.peep = liker AND likee = age.peep
+) FROM peeps
+
+query TB rowsort
+SELECT peeps.peep, age < ANY (
+  SELECT age FROM likes, age WHERE peeps.peep = liker AND likee = age.peep
+) FROM peeps, age
+WHERE peeps.peep = age.peep
+----
+alice true
+bob true
+eve false
+
+query TB rowsort
+SELECT peeps.peep, age < ALL (
+  SELECT age FROM likes, age WHERE peeps.peep = liker AND likee = age.peep
+) FROM peeps, age
+WHERE peeps.peep = age.peep
+----
+alice false
+bob true
+eve true
+
+# ANY/ALL semantics
+
+query BBBBBBBBBBBBBBB
+(VALUES (
+  1 < ANY(SELECT * FROM (VALUES (1)) WHERE false),
+  1 < ANY(VALUES (0)),
+  1 < ANY(VALUES (1)),
+  1 < ANY(VALUES (2)),
+  1 < ANY(VALUES (0), (NULL)),
+  1 < ANY(VALUES (1), (NULL)),
+  1 < ANY(VALUES (2), (NULL)),
+  NULL < ANY(SELECT * FROM (VALUES (1)) WHERE false),
+  NULL < ANY(VALUES (0)),
+  NULL < ANY(VALUES (1)),
+  NULL < ANY(VALUES (2)),
+  NULL < ANY(VALUES (NULL)),
+  NULL < ANY(VALUES (0), (NULL)),
+  NULL < ANY(VALUES (1), (NULL)),
+  NULL < ANY(VALUES (2), (NULL))
+))
+----
+false  false  false  true  NULL  NULL  true  false  NULL  NULL  NULL  NULL  NULL  NULL  NULL
+
+query BBBBBBBBBBBBBBB
+(VALUES (
+  1 < ALL(SELECT * FROM (VALUES (1)) WHERE false),
+  1 < ALL(VALUES (0)),
+  1 < ALL(VALUES (1)),
+  1 < ALL(VALUES (2)),
+  1 < ALL(VALUES (0), (NULL)),
+  1 < ALL(VALUES (1), (NULL)),
+  1 < ALL(VALUES (2), (NULL)),
+  NULL < ALL(SELECT * FROM (VALUES (1)) WHERE false),
+  NULL < ALL(VALUES (0)),
+  NULL < ALL(VALUES (1)),
+  NULL < ALL(VALUES (2)),
+  NULL < ALL(VALUES (NULL)),
+  NULL < ALL(VALUES (0), (NULL)),
+  NULL < ALL(VALUES (1), (NULL)),
+  NULL < ALL(VALUES (2), (NULL))
+))
+----
+true  false  false  true  false  false  NULL  true  NULL  NULL  NULL  NULL  NULL  NULL  NULL
+
+query error subquery has 0 columns available but 1 columns specified
+SELECT 1 < ALL(SELECT * FROM nullary)
+
+query error Expected subselect to return 1 column, got 0 columns
+SELECT (SELECT);
+----
+
+query
+SELECT * FROM (SELECT);
+----
+
+
+query error subquery has 2 columns available but 1 columns specified
+SELECT 1 < ALL(SELECT 1, 2)
+
+statement ok
+CREATE TABLE s1 (a int NOT NULL)
+
+statement ok
+CREATE TABLE s2 (a int NOT NULL)
+
+statement ok
+CREATE TABLE s3 (b int NOT NULL)
+
+statement ok
+INSERT INTO s1 VALUES (0)
+
+statement ok
+INSERT INTO s2 VALUES (1)
+
+statement ok
+INSERT INTO s3 VALUES (1)
+
+# Verify that scope resolution prefers the closer scope when a name occurs in
+# multiple outer levels.
+query B
+SELECT true FROM s1 WHERE EXISTS (SELECT true FROM s2 WHERE EXISTS (SELECT true FROM s3 WHERE a = s3.b))
+----
+true
+
+statement ok
+CREATE TABLE t1 (a int NOT NULL)
+
+statement ok
+CREATE TABLE t2 (b int NOT NULL)
+
+statement ok
+CREATE TABLE t3 (a int NOT NULL, b int NOT NULL)
+
+statement ok
+INSERT INTO t1 VALUES (1), (2), (3)
+
+statement ok
+INSERT INTO t2 VALUES (1), (2), (3)
+
+statement ok
+INSERT INTO t3 VALUES (2, 3), (1, 4)
+
+# Test a constraint that spans multiple levels of nesting.
+query I
+SELECT a FROM t1 WHERE EXISTS (SELECT 1 FROM t2 WHERE EXISTS (SELECT 1 FROM t3 WHERE t1.a = t3.a AND t2.b = t3.b))
+----
+2
+
+mode standard
+
+# Verify that the plans for some simple non-correlated subqueries are sane.
+
+query T multiline
+EXPLAIN PLAN FOR SELECT * FROM t1 WHERE EXISTS (SELECT * FROM t2)
+----
+Source materialize.public.t1 (u9):
+| Project (#0)
+
+Source materialize.public.t2 (u10):
+| Project ()
+
+Query:
+%0 =
+| Get materialize.public.t1 (u9)
+
+%1 =
+| Get materialize.public.t2 (u10)
+| Project ()
+| Distinct group=()
+| ArrangeBy ()
+
+%2 =
+| Join %0 %1
+| | implementation = Differential %0 %1.()
+
+EOF
+
+query T multiline
+EXPLAIN PLAN FOR SELECT *  FROM t1, t3 WHERE t1.a = t3.a AND EXISTS (SELECT * FROM t2)
+----
+Source materialize.public.t1 (u9):
+| Project (#0)
+
+Source materialize.public.t2 (u10):
+| Project ()
+
+Source materialize.public.t3 (u11):
+| Project (#0, #1)
+
+Query:
+%0 =
+| Get materialize.public.t1 (u9)
+| ArrangeBy (#0)
+
+%1 =
+| Get materialize.public.t3 (u11)
+
+%2 =
+| Get materialize.public.t2 (u10)
+| Project ()
+| Distinct group=()
+| ArrangeBy ()
+
+%3 =
+| Join %0 %1 %2 (= #0 #1)
+| | implementation = Differential %1 %2.() %0.(#0)
+| Project (#0, #0, #2)
+
+EOF
+
+query T multiline
+EXPLAIN PLAN FOR SELECT *  FROM t1, t3 WHERE t1.a = t3.a AND EXISTS (SELECT * FROM t2 WHERE t3.b = t2.b)
+----
+Source materialize.public.t1 (u9):
+| Project (#0)
+
+Source materialize.public.t2 (u10):
+| Project (#0)
+
+Source materialize.public.t3 (u11):
+| Project (#0, #1)
+
+Query:
+%0 =
+| Get materialize.public.t1 (u9)
+| ArrangeBy (#0)
+
+%1 =
+| Get materialize.public.t3 (u11)
+
+%2 =
+| Get materialize.public.t2 (u10)
+| Distinct group=(#0)
+| ArrangeBy (#0)
+
+%3 =
+| Join %0 %1 %2 (= #0 #1) (= #2 #3)
+| | implementation = Differential %1 %2.(#0) %0.(#0)
+| Project (#0, #0, #2)
+
+EOF
+
+# Regression test for materialize#1158
+# The following subquery currently generates a plan with a map with
+# 4 scalars that refer to other scalars in the map. If query planning optimizes away
+# this particular case, replace with another query that generates such a plan
+query T multiline
+EXPLAIN PLAN FOR
+SELECT age, ascii_num * 2 as result FROM (
+  SELECT age, ascii(letter) AS ascii_num FROM (
+    SELECT age, substr(replaced, 2, 1) AS letter FROM (
+      SELECT age, replace(likee, 'o', 'i') AS replaced FROM (
+        SELECT likee, age FROM likes, age WHERE liker=peep
+      )
+    )
+  )
+)
+----
+Source materialize.public.likes (u3):
+| Filter !(isnull(#0))
+| Project (#0, #1)
+
+Source materialize.public.age (u5):
+| Filter !(isnull(#0))
+| Project (#0, #1)
+
+Query:
+%0 =
+| Get materialize.public.likes (u3)
+| Filter !(isnull(#0))
+| ArrangeBy (#0)
+
+%1 =
+| Get materialize.public.age (u5)
+| Filter !(isnull(#0))
+
+%2 =
+| Join %0 %1 (= #0 #2)
+| | implementation = Differential %1 %0.(#0)
+| Map (ascii(substr(replace(#1, "o", "i"), 2, 1)) * 2)
+| Project (#3, #4)
+
+EOF
+
+mode cockroach
+
+query II rowsort
+SELECT age, ascii_num * 2 as result FROM (
+  SELECT age, ascii(letter) AS ascii_num FROM (
+    SELECT age, substr(replaced, 2, 1) AS letter FROM (
+      SELECT age, replace(likee, 'o', 'i') AS replaced FROM (
+        SELECT likee, age FROM likes, age WHERE liker=peep
+      )
+    )
+  )
+)
+----
+100  236
+103  210
+103  236
+
+# regression test for https://github.com/MaterializeInc/materialize/issues/1708
+
+statement ok
+CREATE TABLE tab0(pk INTEGER PRIMARY KEY, col0 INTEGER, col1 FLOAT, col3 INTEGER)
+
+statement ok
+INSERT INTO tab0 VALUES(0,1,2,63)
+
+statement ok
+INSERT INTO tab0 VALUES(87,63,3,4)
+
+query I rowsort
+SELECT pk FROM tab0 WHERE
+(
+  col3 IN (
+    SELECT col0 FROM tab0
+  )
+)
+----
+0
+
+query I rowsort
+SELECT pk FROM tab0 WHERE
+(
+  (
+    col0 IN (
+      SELECT col3 FROM tab0 WHERE col3 IN (
+        SELECT col0 FROM tab0
+      )
+    )
+  )
+)
+----
+87
+
+query I rowsort
+SELECT pk FROM tab0 WHERE
+(
+  col3 IN (
+    SELECT col0 FROM tab0
+  )
+  OR
+  (
+    col0 IN (
+      SELECT col3 FROM tab0 WHERE col3 IN (
+        SELECT col0 FROM tab0
+      )
+    )
+  )
+)
+----
+0
+87
+
+query I
+SELECT col FROM (SELECT 1 AS col) t WHERE col = ANY(VALUES (1))
+----
+1
+
+query I
+SELECT col FROM (SELECT 1 AS col) t WHERE col IN(VALUES(1))
+----
+1
+
+statement ok
+CREATE TABLE x (a int not null)
+
+statement ok
+CREATE TABLE y (b int not null)
+
+statement ok
+INSERT INTO x VALUES (1), (2), (3);
+
+statement ok
+INSERT INTO y VALUES (2), (3), (4);
+
+query B
+SELECT b != ALL(SELECT a FROM x) FROM y
+----
+false
+false
+true
+
+query T multiline
+EXPLAIN PLAN FOR SELECT b IN (SELECT a FROM x) FROM y
+----
+Source materialize.public.x (u13):
+| Project (#0)
+
+Source materialize.public.y (u14):
+| Project (#0)
+
+Query:
+%0 = Let l0 =
+| Get materialize.public.y (u14)
+| Distinct group=(#0)
+
+%1 =
+| Get %0 (l0)
+| ArrangeBy (#0)
+
+%2 =
+| Get materialize.public.x (u13)
+| Distinct group=(#0)
+| ArrangeBy (#0)
+
+%3 = Let l1 =
+| Join %1 %2 (= #0 #1)
+| | implementation = DeltaQuery
+| |   delta %1 %2.(#0)
+| |   delta %2 %1.(#0)
+| Project (#0)
+
+%4 =
+| Get materialize.public.y (u14)
+| ArrangeBy (#0)
+
+%5 =
+| Get %3 (l1)
+| Map true
+
+%6 =
+| Get %3 (l1)
+| Negate
+
+%7 =
+| Union %6 %0
+| Map false
+
+%8 =
+| Union %5 %7
+
+%9 =
+| Join %4 %8 (= #0 #1)
+| | implementation = Differential %8 %4.(#0)
+| Project (#2)
+
+EOF
+
+query T multiline
+EXPLAIN PLAN FOR SELECT b != ALL(SELECT a FROM x) FROM y
+----
+Source materialize.public.x (u13):
+| Project (#0)
+
+Source materialize.public.y (u14):
+| Project (#0)
+
+Query:
+%0 = Let l0 =
+| Get materialize.public.y (u14)
+| Distinct group=(#0)
+
+%1 =
+| Get %0 (l0)
+| ArrangeBy (#0)
+
+%2 =
+| Get materialize.public.x (u13)
+| Distinct group=(#0)
+| ArrangeBy (#0)
+
+%3 = Let l1 =
+| Join %1 %2 (= #0 #1)
+| | implementation = DeltaQuery
+| |   delta %1 %2.(#0)
+| |   delta %2 %1.(#0)
+| Project (#0)
+
+%4 =
+| Get materialize.public.y (u14)
+| ArrangeBy (#0)
+
+%5 =
+| Get %3 (l1)
+| Map true
+
+%6 =
+| Get %3 (l1)
+| Negate
+
+%7 =
+| Union %6 %0
+| Map false
+
+%8 =
+| Union %5 %7
+
+%9 =
+| Join %4 %8 (= #0 #1)
+| | implementation = Differential %8 %4.(#0)
+| Map !(#2)
+| Project (#3)
+
+EOF
+
+# Check that we correctly invert the filter here via De Morgan.
+query T multiline
+EXPLAIN PLAN FOR SELECT b > ALL(SELECT a FROM x) FROM y
+----
+Source materialize.public.x (u13):
+| Project (#0)
+
+Source materialize.public.y (u14):
+| Project (#0)
+
+Query:
+%0 = Let l0 =
+| Get materialize.public.y (u14)
+| Distinct group=(#0)
+
+%1 =
+| Get %0 (l0)
+| ArrangeBy ()
+
+%2 =
+| Get materialize.public.x (u13)
+
+%3 = Let l1 =
+| Join %1 %2
+| | implementation = Differential %2 %1.()
+| Filter (#0 <= #1)
+| Project (#0)
+| Distinct group=(#0)
+
+%4 =
+| Get materialize.public.y (u14)
+| ArrangeBy (#0)
+
+%5 =
+| Get %3 (l1)
+| Map true
+
+%6 =
+| Get %3 (l1)
+| Negate
+
+%7 =
+| Union %6 %0
+| Map false
+
+%8 =
+| Union %5 %7
+
+%9 =
+| Join %4 %8 (= #0 #1)
+| | implementation = Differential %8 %4.(#0)
+| Map !(#2)
+| Project (#3)
+
+EOF
+
+statement ok
+CREATE TABLE xs (x int not null)
+
+statement ok
+CREATE TABLE ys (y int not null)
+
+statement ok
+INSERT INTO xs VALUES (1), (1), (2);
+
+statement ok
+INSERT INTO ys VALUES (0), (1), (2);
+
+# Check that we correctly perform subqueries that do not preserve
+# multiplicity of the outer relation.
+query II rowsort
+select x, (select count(*) from ys where y < x) from xs
+----
+1  1
+1  1
+2  2
+
+# Tests that conditional subqueries should not error.
+query RR rowsort
+select y, (
+    case when (select count(*) from xs where x < y) != 0
+         then (select 1.0 / count(*) from xs where x < y)
+         else (select 1.0 / (count(*) - 1) from xs where x < y)
+         end
+  )
+from ys
+----
+0  -1
+1  -1
+2  0.5
+
+# Regression test for #3924, in which quantified comparision simplification was
+# not correctly handling LATERAL joins.
+query II
+SELECT * FROM (VALUES (1)), LATERAL (SELECT * FROM (SELECT column1) WHERE true)
+----
+1  1
+
+# Regression test for #3933, in which the query planner mishandled the outer
+# scope of a nested LATERAL join.
+query IIII
+SELECT * FROM
+    (SELECT 1, 1 AS col2),
+    LATERAL (SELECT * FROM (SELECT col2) LEFT JOIN LATERAL (SELECT col2) ON true)
+----
+1  1  1  1
+
+# Regression test for #4157, in which quantified expression simplification
+# failed to handle map expressions which depended upon a column introduced by
+# an earlier expression in the same map node.
+query I
+SELECT (SELECT 1 FROM ((SELECT col1) UNION (SELECT 1)))
+FROM (SELECT 1 col1)
+----
+1
+
+query error aggregate functions that refer exclusively to outer columns not yet supported
+SELECT (SELECT count(likes.likee)) FROM likes
+
+# Regression test for #7121, where the multiplicity of the outer query was not
+# preserved when an EXISTS subquery only involves constants/mpf/flatmaps.
+query I
+SELECT x FROM xs WHERE EXISTS (SELECT y FROM (SELECT 1 as y) WHERE x = y)
+----
+1
+1
+
+# Regression test for #9921, in which the presence of a SELECT subquery inside
+# of another subexpression produced a degenerate join that was not elided before
+# join implementation planning.
+query I
+SELECT 1 FROM x RIGHT JOIN (SELECT 2 FROM y) ON  NULL
+WHERE a IN (9, 0)
+  OR 0  <  ALL (
+      SELECT agg1  NULL
+      FROM (SELECT MAX(3) agg1  FROM (SELECT  FROM x)
+      GROUP BY TRUE)
+  )
+  GROUP BY TRUE;
+----
+1
+
+query T multiline
+EXPLAIN SELECT 1 FROM x RIGHT JOIN (SELECT 2 FROM y) ON  NULL
+WHERE a IN (9, 0)
+  OR 0  <  ALL (
+      SELECT agg1  NULL
+      FROM (SELECT MAX(3) agg1  FROM (SELECT  FROM x)
+      GROUP BY TRUE)
+  )
+  GROUP BY TRUE;
+----
+Source materialize.public.x (u13):
+| Project ()
+
+Source materialize.public.y (u14):
+| Project ()
+
+Query:
+%0 =
+| Get materialize.public.y (u14)
+| Project ()
+| Distinct group=()
+| Map 1
+
+EOF

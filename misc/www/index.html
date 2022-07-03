@@ -1,0 +1,70 @@
+<!--
+Copyright Materialize, Inc. All rights reserved.
+
+Use of this software is governed by the Business Source License
+included in the LICENSE file at the root of this repository.
+
+As of the Change Date specified in that file, in accordance with
+the Business Source License, use of this software will be governed
+by the Apache License, Version 2.0.
+-->
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Materialize developer hub</title>
+
+    <style>
+        .code {
+            font-family: monospace;
+            margin-left: 40px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Materialize developer hub</h1>
+
+    <p>Download latest materialized(1) binaries:</p>
+    <ul>
+      <li>
+        <a href="https://binaries.materialize.com/materialized-latest-x86_64-unknown-linux-gnu.tar.gz"><code>x86_64-unknown-linux-gnu</code></a>
+      </li>
+      <li>
+        <a href="https://binaries.materialize.com/materialized-latest-aarch64-unknown-linux-gnu.tar.gz"><code>aarch64-unknown-linux-gnu</code></a>
+      </li>
+      <li>
+        <a href="https://binaries.materialize.com/materialized-latest-x86_64-apple-darwin.tar.gz"><code>x86_64-apple-darwin</code></a>
+      </li>
+      <li>
+        <a href="https://binaries.materialize.com/materialized-latest-aarch64-apple-darwin.tar.gz"><code>aarch64-apple-darwin</code></a>
+      </li>
+    </ul>
+
+    <p>Linux one-liner:</p>
+    <div class="code">
+      $ curl -L https://binaries.materialize.com/materialized-latest-$(uname -m)-unknown-linux-gnu.tar.gz | sudo tar -xzC /usr/local --strip-components=1
+    </div>
+
+    <p>macOS one-liner:</p>
+    <div class="code">
+      $ curl -L https://binaries.materialize.com/materialized-latest-$(uname -m)-apple-darwin.tar.gz | sudo tar -xzC /usr/local --strip-components=1
+    </div>
+
+    <p>Resources:</p>
+    <ul>
+        <li>
+          Internal API documentation
+          <ul>
+            <li><a href="api/rust/">Rust (public symbols only)</a></li>
+            <li><a href="api/rust-private/">Rust (private symbols included)</a></li>
+            <li><a href="api/python/materialize/">Python</a></li>
+          </ul>
+        </li>
+        <li><a href="https://buildkite.com/materialize">Buildkite (CI)</a></li>
+    </ul>
+
+    <p>DEB822 source (apt 2.3.10+)</p>
+    <a href="apt/materialize.sources">https://dev.materialize.com/apt/materialize.sources</a>
+</body>
+</html>

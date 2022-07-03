@@ -1,0 +1,160 @@
+# Test portal max rows. Note that even though there are two rows returned,
+# even after the second execute a portal suspended is returned, not
+# command complete.
+send
+Query {"query": "BEGIN"}
+Parse {"query": "VALUES (1), (2)"}
+Bind
+Execute {"max_rows": 1}
+Execute {"max_rows": 1}
+Execute {"max_rows": 1}
+Execute {"max_rows": 1}
+Query {"query": "COMMIT"}
+Sync
+----
+
+until
+ReadyForQuery
+ReadyForQuery
+ReadyForQuery
+----
+CommandComplete {"tag":"BEGIN"}
+ReadyForQuery {"status":"T"}
+ParseComplete
+BindComplete
+DataRow {"fields":["1"]}
+PortalSuspended
+DataRow {"fields":["2"]}
+PortalSuspended
+CommandComplete {"tag":"SELECT 0"}
+CommandComplete {"tag":"SELECT 0"}
+CommandComplete {"tag":"COMMIT"}
+ReadyForQuery {"status":"I"}
+ReadyForQuery {"status":"I"}
+
+# Test when max rows > number of total rows.
+send
+Query {"query": "BEGIN"}
+Parse {"query": "VALUES (1), (2)"}
+Bind
+Execute {"max_rows": 3}
+Execute {"max_rows": 3}
+Execute {"max_rows": 3}
+Query {"query": "COMMIT"}
+Sync
+----
+
+until
+ReadyForQuery
+ReadyForQuery
+ReadyForQuery
+----
+CommandComplete {"tag":"BEGIN"}
+ReadyForQuery {"status":"T"}
+ParseComplete
+BindComplete
+DataRow {"fields":["1"]}
+DataRow {"fields":["2"]}
+CommandComplete {"tag":"SELECT 2"}
+CommandComplete {"tag":"SELECT 0"}
+CommandComplete {"tag":"SELECT 0"}
+CommandComplete {"tag":"COMMIT"}
+ReadyForQuery {"status":"I"}
+ReadyForQuery {"status":"I"}
+
+# Verify correct Close error.
+send
+Query {"query": "CLOSE c"}
+----
+
+until
+ReadyForQuery
+----
+ErrorResponse {"fields":[{"typ":"S","value":"ERROR"},{"typ":"C","value":"34000"},{"typ":"M","value":"cursor \"c\" does not exist"}]}
+ReadyForQuery {"status":"I"}
+
+# Verify that portals (cursors) are destroyed on Sync.
+send
+Parse {"query": "VALUES (1), (2)"}
+Bind {"portal": "c"}
+Execute {"portal": "c", "max_rows": 1}
+Sync
+Query {"query": "FETCH c"}
+----
+
+until err_field_typs=M
+ReadyForQuery
+ReadyForQuery
+----
+ParseComplete
+BindComplete
+DataRow {"fields":["1"]}
+PortalSuspended
+ReadyForQuery {"status":"I"}
+ErrorResponse {"fields":[{"typ":"M","value":"cursor \"c\" does not exist"}]}
+ReadyForQuery {"status":"I"}
+
+# Verify portal reuse errors.
+
+send
+Query {"query": "BEGIN; DECLARE c CURSOR FOR SELECT 1; DECLARE c CURSOR FOR SELECT 1"}
+Query {"query": "ROLLBACK"}
+----
+
+until
+ReadyForQuery
+ReadyForQuery
+----
+CommandComplete {"tag":"BEGIN"}
+CommandComplete {"tag":"DECLARE CURSOR"}
+ErrorResponse {"fields":[{"typ":"S","value":"ERROR"},{"typ":"C","value":"42P03"},{"typ":"M","value":"cursor \"c\" already exists"}]}
+ReadyForQuery {"status":"E"}
+CommandComplete {"tag":"ROLLBACK"}
+ReadyForQuery {"status":"I"}
+
+send
+Query {"query": "BEGIN; DECLARE c CURSOR FOR SELECT 1"}
+Parse {"query": "VALUES (1), (2)"}
+Bind {"portal": "c"}
+Sync
+Query {"query": "ROLLBACK"}
+----
+
+until
+ReadyForQuery
+ReadyForQuery
+ReadyForQuery
+----
+CommandComplete {"tag":"BEGIN"}
+CommandComplete {"tag":"DECLARE CURSOR"}
+ReadyForQuery {"status":"T"}
+ParseComplete
+ErrorResponse {"fields":[{"typ":"S","value":"ERROR"},{"typ":"C","value":"42P03"},{"typ":"M","value":"cursor \"c\" already exists"}]}
+ReadyForQuery {"status":"E"}
+CommandComplete {"tag":"ROLLBACK"}
+ReadyForQuery {"status":"I"}
+
+send
+Query {"query": "BEGIN"}
+Parse {"query": "VALUES (1), (2)"}
+Bind {"portal": "c"}
+Sync
+Query {"query": "DECLARE c CURSOR FOR SELECT 1"}
+Query {"query": "ROLLBACK"}
+----
+
+until
+ReadyForQuery
+ReadyForQuery
+ReadyForQuery
+ReadyForQuery
+----
+CommandComplete {"tag":"BEGIN"}
+ReadyForQuery {"status":"T"}
+ParseComplete
+BindComplete
+ReadyForQuery {"status":"T"}
+ErrorResponse {"fields":[{"typ":"S","value":"ERROR"},{"typ":"C","value":"42P03"},{"typ":"M","value":"cursor \"c\" already exists"}]}
+ReadyForQuery {"status":"E"}
+CommandComplete {"tag":"ROLLBACK"}
+ReadyForQuery {"status":"I"}

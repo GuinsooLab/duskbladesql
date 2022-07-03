@@ -1,0 +1,126 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/rename_constraint
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+# not supported yet
+halt
+
+mode cockroach
+
+statement ok
+CREATE TABLE t (
+  x INT, y INT,
+  CONSTRAINT cu UNIQUE (x),
+  CONSTRAINT cc CHECK (x > 10),
+  CONSTRAINT cf FOREIGN KEY (x) REFERENCES t(x)
+  )
+
+query T
+SELECT create_statement FROM [SHOW CREATE t]
+----
+CREATE TABLE t (
+   x INT8 NULL,
+   y INT8 NULL,
+   CONSTRAINT cf FOREIGN KEY (x) REFERENCES t (x),
+   UNIQUE INDEX cu (x ASC),
+   FAMILY "primary" (x, y, rowid),
+   CONSTRAINT cc CHECK (x > 10)
+)
+
+query TT
+SELECT conname, contype FROM pg_catalog.pg_constraint ORDER BY conname
+----
+cc  c
+cf  f
+cu  u
+
+subtest rename_works
+
+statement ok
+ALTER TABLE t RENAME CONSTRAINT cu TO cu2,
+              RENAME CONSTRAINT cf TO cf2,
+			  RENAME CONSTRAINT cc TO cc2
+
+query T
+SELECT create_statement FROM [SHOW CREATE t]
+----
+CREATE TABLE t (
+   x INT8 NULL,
+   y INT8 NULL,
+   CONSTRAINT cf2 FOREIGN KEY (x) REFERENCES t (x),
+   UNIQUE INDEX cu2 (x ASC),
+   FAMILY "primary" (x, y, rowid),
+   CONSTRAINT cc2 CHECK (x > 10)
+)
+
+query TT
+SELECT conname, contype FROM pg_catalog.pg_constraint ORDER BY conname
+----
+cc2  c
+cf2  f
+cu2  u
+
+
+subtest duplicate_constraints
+
+statement error duplicate constraint
+ALTER TABLE t RENAME CONSTRAINT cu2 TO cf2
+
+statement error duplicate constraint
+ALTER TABLE t RENAME CONSTRAINT cu2 TO cc2
+
+statement error duplicate constraint
+ALTER TABLE t RENAME CONSTRAINT cf2 TO cu2
+
+statement error duplicate constraint
+ALTER TABLE t RENAME CONSTRAINT cf2 TO cc2
+
+statement error duplicate constraint
+ALTER TABLE t RENAME CONSTRAINT cc2 TO cf2
+
+statement error duplicate constraint
+ALTER TABLE t RENAME CONSTRAINT cc2 TO cu2
+
+subtest multiple_renames
+
+statement ok
+ALTER TABLE t RENAME CONSTRAINT cu2 TO cu3,
+			  RENAME CONSTRAINT cc2 TO cc3,
+			  RENAME CONSTRAINT cf2 TO cf3,
+              RENAME CONSTRAINT cu3 TO cu4,
+			  RENAME CONSTRAINT cc3 TO cc4,
+			  RENAME CONSTRAINT cf3 TO cf4
+
+query T
+SELECT create_statement FROM [SHOW CREATE t]
+----
+CREATE TABLE t (
+   x INT8 NULL,
+   y INT8 NULL,
+   CONSTRAINT cf4 FOREIGN KEY (x) REFERENCES t (x),
+   UNIQUE INDEX cu4 (x ASC),
+   FAMILY "primary" (x, y, rowid),
+   CONSTRAINT cc4 CHECK (x > 10)
+)
+
+query TT
+SELECT conname, contype FROM pg_catalog.pg_constraint ORDER BY conname
+----
+cc4  c
+cf4  f
+cu4  u

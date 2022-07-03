@@ -1,0 +1,41 @@
+[package]
+name = "mz-storaged"
+description = "Materialize's storage server."
+version = "0.26.1-dev"
+edition = "2021"
+rust-version = "1.61.0"
+publish = false
+
+[dependencies]
+anyhow = "1.0.58"
+axum = "0.5.9"
+clap = { version = "3.2.6", features = ["derive", "env"] }
+futures = "0.3.21"
+mz-build-info = { path = "../build-info" }
+mz-dataflow-types = { path = "../dataflow-types" }
+mz-http-util = { path = "../http-util" }
+mz-orchestrator-tracing = { path = "../orchestrator-tracing" }
+mz-ore = { path = "../ore", features = ["task", "tracing_"] }
+mz-pid-file = { path = "../pid-file" }
+mz-prof = { path = "../prof" }
+mz-service = { path = "../service" }
+mz-storage = { path = "../storage", features = ["server"] }
+once_cell = "1.0.12"
+serde = "1.0.137"
+timely = { git = "https://github.com/TimelyDataflow/timely-dataflow", default-features = false, features = ["bincode"] }
+tokio = { version = "1.19.2", features = ["net"] }
+tracing = "0.1.35"
+tracing-subscriber = "0.3.11"
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+# According to jemalloc developers, `background_threads` should always be
+# enabled, except in "esoteric" situations that don't apply to Materialize
+# (Namely: if the application relies on new threads not being created for whatever reason)
+#
+# See: https://github.com/jemalloc/jemalloc/issues/956#issuecomment-316224733
+tikv-jemallocator = { version = "0.4.3", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms", "background_threads"], optional = true }
+
+[features]
+default = ["jemalloc"]
+jemalloc = ["tikv-jemallocator", "mz-prof/jemalloc"]
+tokio-console = ["mz-ore/tokio-console"]

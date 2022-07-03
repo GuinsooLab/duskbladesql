@@ -1,0 +1,101 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/ordinal_references
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+# not supported yet
+halt
+
+mode cockroach
+
+statement ok
+CREATE TABLE foo(a INT, b CHAR)
+
+query I
+INSERT INTO foo(a, b) VALUES (1,'c'), (2,'b'), (3,'a') RETURNING @1
+----
+1
+2
+3
+
+query error invalid column ordinal
+SELECT @0 FROM foo
+
+query error invalid column ordinal
+SELECT @42 FROM foo
+
+query TI rowsort
+SELECT @2, @1 FROM foo
+----
+c 1
+b 2
+a 3
+
+# Traditional SQL ordinals refer to the render list.
+query TI
+SELECT b, a FROM foo ORDER BY 1
+----
+a 3
+b 2
+c 1
+
+# CockroachDB column ordinals refer to the data source.
+query TI
+SELECT b, a FROM foo ORDER BY @1
+----
+c 1
+b 2
+a 3
+
+query TI
+SELECT b, a FROM foo ORDER BY @1 % 2, a
+----
+b 2
+c 1
+a 3
+
+statement ok
+INSERT INTO foo(a, b) VALUES (4, 'c'), (5, 'c'), (6, 'c')
+
+query R
+SELECT sum(a) AS s FROM foo GROUP BY @1 ORDER BY s
+----
+1
+2
+3
+4
+5
+6
+
+query R
+SELECT sum(a) AS s FROM foo GROUP BY @2 ORDER BY s
+----
+2
+3
+16
+
+statement error column reference @1 not allowed in this context
+INSERT INTO foo(a, b) VALUES (@1, @2)
+
+query error column reference @485 not allowed in this context
+VALUES (@485)
+
+query error column reference @1 not allowed in this context
+SELECT * FROM foo LIMIT @1
+
+query error column reference @1 not allowed in this context
+SELECT * FROM foo OFFSET @1

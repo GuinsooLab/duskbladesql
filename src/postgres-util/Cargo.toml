@@ -1,0 +1,21 @@
+[package]
+name = "mz-postgres-util"
+description = "PostgreSQL utility library."
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.61.0"
+publish = false
+
+[dependencies]
+anyhow = "1.0.58"
+mz-ore = { path = "../ore", features = ["task"] }
+mz-proto = { path = "../proto" }
+openssl = { version = "0.10.40", features = ["vendored"] }
+postgres-openssl = { git = "https://github.com/MaterializeInc/rust-postgres" }
+proptest = { git = "https://github.com/MaterializeInc/proptest.git", default-features = false, features = ["std"]}
+prost = "0.10.3"
+serde = { version = "1.0.137", features = ["derive"] }
+tokio-postgres = { git = "https://github.com/MaterializeInc/rust-postgres" }
+
+[build-dependencies]
+tonic-build = "0.7"

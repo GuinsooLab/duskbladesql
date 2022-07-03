@@ -1,0 +1,1086 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+# 🔬 Type resolution (non-array)
+
+# 🔬🔬 bool
+
+query T
+SELECT 'true'::bool
+----
+true
+
+query T
+SELECT 'true'::pg_catalog.bool
+----
+true
+
+# 🔬🔬🔬 bool alias
+
+query T
+SELECT 'true'::boolean
+----
+true
+
+query T
+SELECT pg_typeof('true'::boolean)
+----
+boolean
+
+query error unknown catalog item 'pg_catalog.boolean'
+SELECT 'true'::pg_catalog.boolean
+
+# 🔬🔬 bytea
+
+query T
+SELECT 'a'::bytea
+----
+a
+
+query T
+SELECT 'a'::pg_catalog.bytea
+----
+a
+
+# 🔬🔬🔬 bytea alias
+
+query T
+SELECT 'a'::bytes
+----
+a
+
+query error unknown catalog item 'pg_catalog.bytes'
+SELECT ''::pg_catalog.bytes
+
+# 🔬🔬 date
+
+query T
+SELECT '2007-02-01'::date
+----
+2007-02-01
+
+query T
+SELECT '2007-02-01'::pg_catalog.date
+----
+2007-02-01
+
+# 🔬🔬 float4
+
+query T
+SELECT '1.2'::float4
+----
+1.200
+
+query T
+SELECT '1.2'::pg_catalog.float4
+----
+1.200
+
+# 🔬🔬🔬 float4 aliases
+
+query T
+SELECT '1.2'::float(1)
+----
+1.200
+
+query error unknown catalog item 'pg_catalog.float'
+SELECT '1.2'::pg_catalog.float(1)
+
+query T
+SELECT pg_typeof('1.2'::float(1))
+----
+real
+
+query T
+SELECT '1.2'::real
+----
+1.200
+
+query error unknown catalog item 'pg_catalog.real'
+SELECT '1.2'::pg_catalog.real
+
+query T
+SELECT pg_typeof('1.2'::real)
+----
+real
+
+# 🔬🔬 float8
+
+query T
+SELECT '1.2'::float8
+----
+1.200
+
+query T
+SELECT '1.2'::pg_catalog.float8
+----
+1.200
+
+# 🔬🔬🔬 float8 aliases
+
+query T
+SELECT '1.2'::float(53)
+----
+1.200
+
+query error unknown catalog item 'pg_catalog.float'
+SELECT '1.2'::pg_catalog.float(53)
+
+query T
+SELECT pg_typeof('1.2'::float(53))
+----
+double precision
+
+query T
+SELECT '1.2'::double
+----
+1.200
+
+query error unknown catalog item 'pg_catalog.double'
+SELECT '1.2'::pg_catalog.double
+
+query T
+SELECT pg_typeof('1.2'::double)
+----
+double precision
+
+# 🔬🔬 int2
+
+query T
+SELECT '1'::int2
+----
+1
+
+query T
+SELECT '1'::pg_catalog.int2
+----
+1
+
+# 🔬🔬🔬 int2 aliases
+
+query T
+SELECT '1'::smallint
+----
+1
+
+query error unknown catalog item 'pg_catalog.smallint'
+SELECT '1'::pg_catalog.smallint
+
+query T
+SELECT pg_typeof('1'::smallint)
+----
+smallint
+
+# 🔬🔬 int4
+
+query T
+SELECT '1'::int4
+----
+1
+
+query T
+SELECT '1'::pg_catalog.int4
+----
+1
+
+# 🔬🔬🔬 int4 aliases
+
+query T
+SELECT '1'::int
+----
+1
+
+query error unknown catalog item 'pg_catalog.int'
+SELECT '1'::pg_catalog.int
+
+query T
+SELECT pg_typeof('1'::int)
+----
+integer
+
+query T
+SELECT '1'::integer
+----
+1
+
+query error unknown catalog item 'pg_catalog.integer'
+SELECT '1'::pg_catalog.integer
+
+query T
+SELECT pg_typeof('1'::integer)
+----
+integer
+
+# 🔬🔬 int8
+
+query T
+SELECT '1'::int8
+----
+1
+
+query T
+SELECT '1'::pg_catalog.int8
+----
+1
+
+# 🔬🔬🔬 int8 aliases
+
+query T
+SELECT '1'::bigint
+----
+1
+
+query error unknown catalog item 'pg_catalog.bigint'
+SELECT '1'::pg_catalog.bigint
+
+query T
+SELECT pg_typeof('1'::bigint)
+----
+bigint
+
+# 🔬🔬 interval
+
+query T
+SELECT '1-2 3 4:5:6.7'::interval
+----
+1 year 2 months 3 days 04:05:06.7
+
+query T
+SELECT '1-2 3 4:5:6.7'::pg_catalog.interval
+----
+1 year 2 months 3 days 04:05:06.7
+
+# 🔬🔬🔬 interval prefix
+
+query T
+SELECT interval '1-2 3 4:5:6.7'
+----
+1 year 2 months 3 days 04:05:06.7
+
+query T
+SELECT pg_catalog.interval '1-2 3 4:5:6.7'
+----
+1 year 2 months 3 days 04:05:06.7
+
+# Special interval literal syntax doesn't apply to qualified interval
+query error Expected end of statement, found DAY
+SELECT pg_catalog.interval '1-2 3 4:5:6.7' DAY
+
+# 🔬🔬 jsonb
+
+query T
+SELECT '{"1":2,"3":4}'::jsonb
+----
+{"1":2,"3":4}
+
+query T
+SELECT '{"1":2,"3":4}'::pg_catalog.jsonb
+----
+{"1":2,"3":4}
+
+# 🔬🔬🔬 jsonb aliases
+
+query T
+SELECT '{"1":2,"3":4}'::json
+----
+{"1":2,"3":4}
+
+query error unknown catalog item 'pg_catalog.json'
+SELECT '{"1":2,"3":4}'::pg_catalog.json
+
+# 🔬🔬 numeric
+
+query T
+SELECT '1'::numeric(38,0)
+----
+1
+
+query T
+SELECT '1'::pg_catalog.numeric(38,0)
+----
+1
+
+# 🔬🔬🔬 numeric aliases –– note that decimal alises all resolve to numeric when
+# qualified, unlike all other aliases
+
+query T
+SELECT '1'::decimal(38,0)
+----
+1
+
+query error unknown catalog item 'pg_catalog.decimal'
+SELECT '1'::pg_catalog.decimal(38,0)
+
+query T
+SELECT '1'::dec(38,0)
+----
+1
+
+query error unknown catalog item 'pg_catalog.dec'
+SELECT '1'::pg_catalog.dec(38,0)
+
+# 🔬🔬 oid
+
+query T
+SELECT '1'::oid
+----
+1
+
+query T
+SELECT '1'::pg_catalog.oid
+----
+1
+
+query I
+SELECT 1::oid
+----
+1
+
+query I
+SELECT 1::int4::oid
+----
+1
+
+query I
+SELECT 1::int4::oid::int4
+----
+1
+
+# 🔬🔬 regproc
+
+query T
+SELECT 1::regproc
+----
+1
+
+query T
+SELECT 1::int4::regproc
+----
+1
+
+query T
+SELECT 1::oid::regproc
+----
+1
+
+query T
+SELECT 1::oid::regproc::oid
+----
+1
+
+query T
+SELECT '1'::regproc
+----
+1
+
+query T
+SELECT '1'::pg_catalog.regproc
+----
+1
+
+query T
+SELECT '1'::regproc::text
+----
+1
+
+query T
+SELECT 'now'::regproc::text
+----
+now
+
+query T
+SELECT 'now'::regproc::text::regproc
+----
+1299
+
+query T
+SELECT 'now'::regproc::text::regproc::text
+----
+now
+
+query T
+SELECT 'now'::regproc
+----
+1299
+
+query T
+SELECT 'now'::regproc::oid
+----
+1299
+
+query T
+SELECT NULL::regproc::text
+----
+NULL
+
+# TODO: improve this error message to match postgres.
+query error more than one record produced in subquery
+SELECT 'max'::regproc
+
+query error function "nonexistent" does not exist
+SELECT 'nonexistent'::regproc
+
+query T
+SELECT 'array_in'::regproc
+----
+750
+
+query B
+SELECT 750 = 'array_in'::regproc
+----
+true
+
+statement ok
+CREATE TABLE text_to_regproc (a text);
+
+statement ok
+INSERT INTO text_to_regproc VALUES (NULL), ('array_in');
+
+query I
+SELECT a::regproc FROM text_to_regproc ORDER BY a
+----
+750
+NULL
+
+# Regression for 9194
+query I
+select 'now'::regproc::oid::text::regproc
+----
+1299
+
+# ensure that all existing functions can be cast to their respective names (#9199)
+statement OK
+select oid, oid::regproc::text from (select oid from mz_catalog.mz_functions)
+
+# 🔬🔬 record
+
+query error cannot reference pseudo type pg_catalog.record
+SELECT ROW(1, 2)::record;
+
+query error cannot reference pseudo type pg_catalog.record
+SELECT ROW(1, 2)::pg_catalog.record;
+
+# 🔬🔬 text
+
+query T
+SELECT 'dog'::text
+----
+dog
+
+query T
+SELECT 'dog'::pg_catalog.text
+----
+dog
+
+# 🔬🔬🔬 char
+
+query T
+SELECT 'dog'::char(3)
+----
+dog
+
+query T
+SELECT 'dog'::pg_catalog.bpchar(3)
+----
+dog
+
+query error pg_catalog.char does not support type modifiers
+SELECT 'dog'::pg_catalog.char(3)
+
+# 🔬🔬🔬 varchar
+
+query T
+SELECT 'dog'::varchar(10)
+----
+dog
+
+query T
+SELECT 'dog'::pg_catalog.varchar(10)
+----
+dog
+
+# 🔬🔬 time
+
+query T
+SELECT '01:23:45'::time
+----
+01:23:45
+
+query T
+SELECT '01:23:45'::pg_catalog.time
+----
+01:23:45
+
+# 🔬🔬 timestamp
+
+query T
+SELECT '2007-02-01 15:04:05'::timestamp
+----
+2007-02-01 15:04:05
+
+query T
+SELECT '2007-02-01 15:04:05'::pg_catalog.timestamp
+----
+2007-02-01 15:04:05
+
+# 🔬🔬 timestamptz
+
+query T
+SELECT '2007-02-01 15:04:05'::timestamptz
+----
+2007-02-01 15:04:05+00
+
+query T
+SELECT '2007-02-01 15:04:05'::pg_catalog.timestamptz
+----
+2007-02-01 15:04:05+00
+
+# 🔬🔬 uuid
+
+query T
+SELECT '63616665-6630-3064-6465-616462656568'::uuid
+----
+63616665-6630-3064-6465-616462656568
+
+query T
+SELECT '63616665-6630-3064-6465-616462656568'::pg_catalog.uuid
+----
+63616665-6630-3064-6465-616462656568
+
+# 🔬 Type resolution of list element
+
+query T
+SELECT '{true}'::bool list::text
+----
+{t}
+
+query T
+SELECT '{true}'::pg_catalog.bool list::text
+----
+{t}
+
+# 🔬 float resolves to proper types
+
+query T
+SELECT pg_typeof(1::float)
+----
+double precision
+
+query T
+SELECT pg_typeof(1::float(1))
+----
+real
+
+query T
+SELECT pg_typeof(1::float(53))
+----
+double precision
+
+query T
+SELECT pg_typeof(1::float(53))
+----
+double precision
+
+# 🔬 misc. resolution tests
+
+# pg_catalog and materialize.pg_catalog resolution are equivalent
+query T
+SELECT '1'::materialize.pg_catalog.int4
+----
+1
+
+# tables are not types yet
+query error "pg_catalog.pg_enum" does not refer to a type
+SELECT '1'::pg_catalog.pg_enum
+
+# 🔬 format_type
+
+query T
+SELECT format_type(NULL, NULL)
+----
+NULL
+
+query T
+SELECT format_type(NULL, 1)
+----
+NULL
+
+query T
+SELECT format_type(16, NULL)
+----
+boolean
+
+query T
+SELECT format_type(17, NULL)
+----
+bytea
+
+query T
+SELECT format_type(20, NULL)
+----
+bigint
+
+query T
+SELECT format_type(23, NULL)
+----
+integer
+
+query T
+SELECT format_type(25, NULL)
+----
+text
+
+query T
+SELECT format_type(18, NULL)
+----
+character
+
+query T
+SELECT format_type(1043, NULL)
+----
+character varying
+
+query T
+SELECT format_type(26, NULL)
+----
+oid
+
+query T
+SELECT format_type(700, NULL)
+----
+real
+
+query T
+SELECT format_type(701, NULL)
+----
+double precision
+
+query T
+SELECT format_type(1082, NULL)
+----
+date
+
+query T
+SELECT format_type(1083, NULL)
+----
+time
+
+query T
+SELECT format_type(1114, NULL)
+----
+timestamp
+
+query T
+SELECT format_type(1184, NULL)
+----
+timestamp with time zone
+
+query T
+SELECT format_type(1186, NULL)
+----
+interval
+
+query T
+SELECT format_type(1700, NULL)
+----
+numeric
+
+query T
+SELECT format_type(2950, NULL)
+----
+uuid
+
+query T
+SELECT format_type(3802, NULL)
+----
+jsonb
+
+query T
+SELECT format_type(1000, NULL)
+----
+boolean[]
+
+query T
+SELECT format_type(1001, NULL)
+----
+bytea[]
+
+query T
+SELECT format_type(1005, NULL)
+----
+smallint[]
+
+query T
+SELECT format_type(1016, NULL)
+----
+bigint[]
+
+query T
+SELECT format_type(1007, NULL)
+----
+integer[]
+
+query T
+SELECT format_type(1009, NULL)
+----
+text[]
+
+query T
+SELECT format_type(1028, NULL)
+----
+oid[]
+
+query T
+SELECT format_type(1021, NULL)
+----
+real[]
+
+query T
+SELECT format_type(1022, NULL)
+----
+double precision[]
+
+query T
+SELECT format_type(1182, NULL)
+----
+date[]
+
+query T
+SELECT format_type(1183, NULL)
+----
+time[]
+
+query T
+SELECT format_type(1115, NULL)
+----
+timestamp[]
+
+query T
+SELECT format_type(1185, NULL)
+----
+timestamp with time zone[]
+
+query T
+SELECT format_type(1187, NULL)
+----
+interval[]
+
+query T
+SELECT format_type(1231, NULL)
+----
+numeric[]
+
+query T
+SELECT format_type(2951, NULL)
+----
+uuid[]
+
+query T
+SELECT format_type(3807, NULL)
+----
+jsonb[]
+
+query T
+SELECT format_type(2210, NULL)
+----
+regclass[]
+
+query T
+SELECT format_type(1008, NULL)
+----
+regproc[]
+
+query T
+SELECT format_type(2211, NULL)
+----
+regtype[]
+
+# 🔬🔬 non-type OID
+
+query T
+SELECT format_type(6, NULL);
+----
+???
+
+query T
+SELECT format_type(600, 100);
+----
+???
+
+query T
+SELECT format_type(6000, -100);
+----
+???
+
+# 🔬🔬 non-NULL typemod
+
+query T
+SELECT format_type(1700, 0);
+----
+numeric
+
+query T
+SELECT format_type(1700, 3);
+----
+numeric
+
+query T
+SELECT format_type(1700, 4);
+----
+numeric(0,0)
+
+query T
+SELECT format_type(1700, 65540);
+----
+numeric(1,0)
+
+query T
+SELECT format_type(1700, 65541);
+----
+numeric(1,1)
+
+query T
+SELECT format_type(1700, 2490372);
+----
+numeric(38,0)
+
+query T
+SELECT format_type(1700, 2490371);
+----
+numeric(37,-1)
+
+query T
+SELECT format_type(1700, 2490373);
+----
+numeric(38,1)
+
+query T
+SELECT format_type(1700, -2490373);
+----
+numeric
+
+query T
+SELECT format_type(26, 1);
+----
+oid(1)
+
+query T
+SELECT format_type(26, -1);
+----
+oid
+
+# 🔬🔬 regtype
+
+query T
+SELECT 1::regtype
+----
+1
+
+query T
+SELECT 1::int4::regtype
+----
+1
+
+query T
+SELECT 1::oid::regtype
+----
+1
+
+query T
+SELECT 1::oid::regtype::oid
+----
+1
+
+query T
+SELECT '1'::regtype
+----
+1
+
+query T
+SELECT '1'::pg_catalog.regtype
+----
+1
+
+query T
+SELECT '1'::regtype::text
+----
+1
+
+query T
+SELECT 'date'::regtype::text
+----
+date
+
+query T
+SELECT 'date'::regtype
+----
+1082
+
+query T
+SELECT 'date'::regtype::oid
+----
+1082
+
+query error type "nonexistent" does not exist
+SELECT 'nonexistent'::regtype
+
+query B
+SELECT 1082 = 'date'::regtype
+----
+true
+
+statement ok
+CREATE TABLE text_to_regtype (a text);
+
+statement ok
+INSERT INTO text_to_regtype VALUES (NULL), ('date');
+
+query I
+SELECT a::regtype FROM text_to_regtype ORDER BY a
+----
+1082
+NULL
+
+# Regression for 9194
+query I
+select 'date'::regtype::oid::text::regtype
+----
+1082
+
+# Make sure that there are no functions with duplicate OIDs
+query I
+select oid from (select count(*) as cnt, oid from mz_catalog.mz_functions group by oid) where cnt>1
+----
+
+query T
+SELECT 'date'::regtype::text::regtype
+----
+1082
+
+query T
+SELECT 'date'::regtype::text::regtype::text
+----
+date
+
+query T
+SELECT NULL::regtype::text
+----
+NULL
+
+# ensure that all existing types can be cast to their respective names
+statement OK
+select oid, oid::regtype::text from (select oid from mz_catalog.mz_types)
+
+# 🔬🔬 regclass
+
+query T
+SELECT 1::regclass
+----
+1
+
+query T
+SELECT 1::int4::regclass
+----
+1
+
+query T
+SELECT 1::oid::regclass
+----
+1
+
+query T
+SELECT 1::oid::regclass::oid
+----
+1
+
+query T
+SELECT '1'::regclass
+----
+1
+
+query T
+SELECT '1'::pg_catalog.regclass
+----
+1
+
+query T
+SELECT '1'::regclass::text
+----
+1
+
+query T
+SELECT 'mz_tables'::regclass::text
+----
+mz_tables
+
+query B
+SELECT 'mz_tables'::regclass = (SELECT oid FROM mz_objects WHERE name = 'mz_tables')
+----
+true
+
+query B
+SELECT 'mz_tables'::regclass::oid = (SELECT oid FROM mz_objects WHERE name = 'mz_tables')
+----
+true
+
+query error object "nonexistent" does not exist
+SELECT 'nonexistent'::regclass
+
+statement ok
+CREATE TABLE text_to_regclass (a text);
+
+statement ok
+INSERT INTO text_to_regclass VALUES (NULL), ('mz_tables');
+
+query T
+SELECT a::regclass::text FROM text_to_regclass ORDER BY a
+----
+mz_tables
+NULL
+
+# Regression for 9194
+query B
+select 'mz_tables'::regclass::oid::text::regclass = (SELECT oid FROM mz_objects WHERE name = 'mz_tables')
+----
+true
+
+# Make sure that there are no classes with duplicate OIDs
+query I
+select oid from (select count(*) as cnt, oid from pg_catalog.pg_class group by oid) where cnt>1
+----
+
+query T
+SELECT NULL::regclass::text
+----
+NULL
+
+# ensure that all existing types can be cast to their respective names
+statement OK
+select oid, oid::regclass::text from (select oid from pg_catalog.pg_class)
+
+# multiple tables with the same name cause a lookup collision
+statement OK
+create schema test
+
+statement OK
+create schema test2
+
+statement ok
+CREATE TABLE test.table_with_id(i int);
+
+statement ok
+CREATE TABLE test2.table_with_id(i int);
+
+# unqualified duplicate names will lead to an error
+statement error more than one record produced in subquery
+SELECT 'table_with_id'::regclass
+
+# fully qualified names are not yet supported
+statement error object "test.table_with_id" does not exist
+SELECT 'test.table_with_id'::regclass

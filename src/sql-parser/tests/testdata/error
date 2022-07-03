@@ -1,0 +1,230 @@
+# Copyright 2020 sqlparser-rs contributors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# This file is derived from the sqlparser-rs project, available at
+# https://github.com/andygrove/sqlparser-rs. It was incorporated
+# directly into Materialize on December 21, 2019.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License in the LICENSE file at the
+# root of this repository, or online at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+parse-statement
+SELECT 1, 2, FROM a
+----
+error: expected expression, but found reserved keyword
+SELECT 1, 2, FROM a
+             ^
+
+parse-statement
+UPDATE t WHERE 1
+----
+error: Expected SET, found WHERE
+UPDATE t WHERE 1
+         ^
+
+parse-statement
+UPDATE t SET a = 1 extrabadstuff
+----
+error: Expected end of statement, found identifier "extrabadstuff"
+UPDATE t SET a = 1 extrabadstuff
+                   ^
+
+parse-statement
+SELECT ALL DISTINCT name FROM customer
+----
+error: Cannot specify both ALL and DISTINCT in SELECT
+SELECT ALL DISTINCT name FROM customer
+           ^
+
+parse-statement
+INSERT public.customer (id, name, active) VALUES (1, 2, 3)
+----
+error: Expected INTO, found identifier "public"
+INSERT public.customer (id, name, active) VALUES (1, 2, 3)
+       ^
+
+parse-statement
+SELECT foo AS
+----
+error: Expected an identifier after AS, found EOF
+SELECT foo AS
+             ^
+
+parse-statement
+SELECT 1 FROM foo AS
+----
+error: Expected an identifier after AS, found EOF
+SELECT 1 FROM foo AS
+                    ^
+
+parse-statement
+SELECT count(ALL DISTINCT + x) FROM customer
+----
+error: Cannot specify both ALL and DISTINCT in function: count
+SELECT count(ALL DISTINCT + x) FROM customer
+                 ^
+
+parse-statement
+SELECT INTERVAL '01:01.01' MINUTE (5) TO SECOND (5)
+----
+error: Expected end of statement, found left parenthesis
+SELECT INTERVAL '01:01.01' MINUTE (5) TO SECOND (5)
+                                  ^
+
+parse-statement
+SELECT 1 WHERE 1 < ANY SELECT 2
+----
+error: Expected left parenthesis, found SELECT
+SELECT 1 WHERE 1 < ANY SELECT 2
+                       ^
+
+parse-statement
+SELECT 1 WHERE 1 < NONE (SELECT 2)
+----
+error: expected expression, but found reserved keyword
+SELECT 1 WHERE 1 < NONE (SELECT 2)
+                         ^
+
+parse-statement
+SELECT 1 WHERE 1 < ANY (SELECT 2
+----
+error: Expected right parenthesis, found EOF
+SELECT 1 WHERE 1 < ANY (SELECT 2
+                                ^
+
+parse-statement
+SELECT 1 WHERE 1 + ANY (SELECT 2)
+----
+SELECT 1 WHERE 1 +ANY (SELECT 2)
+=>
+Select(SelectStatement { query: Query { ctes: [], body: Select(Select { distinct: None, projection: [Expr { expr: Value(Number("1")), alias: None }], from: [], selection: Some(AnySubquery { left: Value(Number("1")), op: Op { namespace: [], op: "+" }, right: Query { ctes: [], body: Select(Select { distinct: None, projection: [Expr { expr: Value(Number("2")), alias: None }], from: [], selection: None, group_by: [], having: None, options: [] }), order_by: [], limit: None, offset: None } }), group_by: [], having: None, options: [] }), order_by: [], limit: None, offset: None }, as_of: None })
+
+parse-statement
+SELECT EXISTS (NULL)
+----
+error: Expected SELECT, VALUES, or a subquery in the query body, found NULL
+SELECT EXISTS (NULL)
+               ^
+
+parse-statement
+SELECT SELECT 1 FROM bar WHERE 1=1 FROM baz
+----
+error: Expected end of statement, found SELECT
+SELECT SELECT 1 FROM bar WHERE 1=1 FROM baz
+       ^
+
+parse-statement
+SELECT foo FROM
+
+----
+----
+error: Expected identifier, found EOF
+
+^
+----
+----
+
+parse-statement
+
+
+SEL
+
+ECT
+----
+error: Expected a keyword at the beginning of a statement, found identifier "sel"
+SEL
+^
+
+parse-statement
+SELECT foo
+FROM bar+1 ORDER
+BY
+----
+error: Expected end of statement, found operator "+"
+FROM bar+1 ORDER
+        ^
+
+parse-statement
+SELECT * FROM db.public..customer
+----
+error: Expected identifier, found dot
+SELECT * FROM db.public..customer
+                        ^
+
+parse-statement
+SELECT * FROM
+----
+error: Expected identifier, found EOF
+SELECT * FROM
+             ^
+
+parse-statement
+SELECT '
+----
+error: unterminated quoted string
+SELECT '
+       ^
+
+parse-statement
+SELECT E'
+----
+error: unterminated quoted string
+SELECT E'
+        ^
+
+parse-statement
+SELECT E'\u&'
+----
+error: invalid unicode escape
+SELECT E'\u&'
+         ^
+
+parse-statement
+SELECT E'\u&&&&'
+----
+error: invalid unicode escape
+SELECT E'\u&&&&'
+         ^
+
+# List literal expressions must begin with `LIST` before interior lists can
+# omit it.
+parse-statement
+SELECT [1, 2]
+----
+error: Expected an expression, found left square bracket
+SELECT [1, 2]
+       ^
+
+# Subscripts must have values
+parse-statement
+SELECT LIST[1][]
+----
+error: Expected an expression, found right square bracket
+SELECT LIST[1][]
+               ^
+
+# Prevously supported experimental array-like slice subscripting for lists
+parse-statement
+SELECT LIST[1][1:1,1:1]
+----
+error: Expected right square bracket, found comma
+SELECT LIST[1][1:1,1:1]
+                  ^
+
+
+parse-scalar
+ARRAY[]::int[1 + 1]
+----
+error: Expected right square bracket, found operator "+"
+ARRAY[]::int[1 + 1]
+               ^

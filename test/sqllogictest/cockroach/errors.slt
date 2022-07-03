@@ -1,0 +1,44 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/errors
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+# not supported yet
+halt
+
+mode cockroach
+
+statement error pgcode 42P01 relation "fake1" does not exist
+ALTER TABLE fake1 DROP COLUMN a
+
+statement error pgcode 42P01 relation "fake2" does not exist
+CREATE INDEX i ON fake2 (a)
+
+statement error pgcode 42P01 relation "fake3" does not exist
+DROP INDEX fake3@i
+
+statement error pgcode 42P01 relation "fake4" does not exist
+DROP TABLE fake4
+
+statement error pgcode 42P01 relation "fake5" does not exist
+SHOW COLUMNS FROM fake5
+
+statement error pgcode 42P01 relation "fake6" does not exist
+INSERT INTO fake6 VALUES (1, 2)
+
+statement error pgcode 42P01 relation "fake7" does not exist
+SELECT * FROM fake7

@@ -1,0 +1,491 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+# Basic tests of the `CREATE CLUSTER` and `DROP CLUSTER` DDL statements.
+
+mode cockroach
+
+statement error CLUSTER without REPLICAS option not yet supported
+CREATE CLUSTER foo
+
+statement ok
+CREATE CLUSTER foo REPLICAS ()
+
+statement ok
+DROP CLUSTER foo
+
+statement error REPLICAS specified more than once
+CREATE CLUSTER foo REPLICAS (), REPLICAS()
+
+# Creating cluster w/ remote replica works.
+
+statement ok
+CREATE CLUSTER foo REPLICAS (r1 (REMOTE ['localhost:1234']))
+
+statement error cluster 'foo' already exists
+CREATE CLUSTER foo REPLICAS (r1 (REMOTE ['localhost:1234']))
+
+statement error cannot create multiple replicas named 'r1' on cluster 'bar'
+CREATE CLUSTER bar REPLICAS (r1 (REMOTE ['localhost:1234']), r1 (REMOTE ['localhost:1234']))
+
+statement error REMOTE specified more than once
+CREATE CLUSTER bar REPLICAS (r1 (REMOTE ['localhost:1234'], REMOTE ['localhost:1234']))
+
+statement ok
+CREATE CLUSTER bar REPLICAS (r1 (REMOTE ['localhost:1235']), r2 (REMOTE ['localhost:1236']))
+
+query TT rowsort
+SELECT * FROM mz_clusters
+----
+1 default
+3 foo
+4 bar
+
+query T rowsort
+SHOW CLUSTERS
+----
+bar
+default
+foo
+
+query T rowsort
+SHOW CLUSTERS LIKE 'd%'
+----
+default
+
+# Test invalid option combinations.
+
+statement error only one of REMOTE or SIZE may be specified
+CREATE CLUSTER baz REPLICAS (r1 (REMOTE ['localhost:1234'], SIZE 'small'))
+
+# Test `cluster` session variable.
+
+query T
+SHOW cluster
+----
+default
+
+statement ok
+SET cluster = 'bar'
+
+query T
+SHOW cluster
+----
+bar
+
+statement ok
+CREATE MATERIALIZED VIEW v AS SELECT 1
+
+statement ok
+SET cluster = 'default'
+
+query T
+SELECT * FROM v
+----
+1
+
+query TTTTTTT
+SHOW INDEXES ON v IN CLUSTER bar;
+----
+bar v v_primary_idx 1 ?column? NULL false
+
+statement ok
+CREATE DEFAULT INDEX foo_v_idx IN CLUSTER foo ON v
+
+query TTTTTTT
+SHOW INDEXES IN CLUSTER bar;
+----
+bar  v  v_primary_idx  1  ?column?  NULL  false
+
+query TTTTTTT
+SHOW EXTENDED INDEXES IN CLUSTER bar;
+----
+bar  mz_arrangement_batches_internal  mz_arrangement_batches_internal_4_primary_idx  1  operator  NULL  false
+bar  mz_arrangement_batches_internal  mz_arrangement_batches_internal_4_primary_idx  2  worker  NULL  false
+bar  mz_arrangement_records_internal  mz_arrangement_records_internal_4_primary_idx  1  operator  NULL  false
+bar  mz_arrangement_records_internal  mz_arrangement_records_internal_4_primary_idx  2  worker  NULL  false
+bar  mz_arrangement_sharing_internal  mz_arrangement_sharing_internal_4_primary_idx  1  operator  NULL  false
+bar  mz_arrangement_sharing_internal  mz_arrangement_sharing_internal_4_primary_idx  2  worker  NULL  false
+bar  mz_dataflow_channels  mz_dataflow_channels_4_primary_idx  1  id  NULL  false
+bar  mz_dataflow_channels  mz_dataflow_channels_4_primary_idx  2  worker  NULL  false
+bar  mz_dataflow_operator_addresses  mz_dataflow_operator_addresses_4_primary_idx  1  id  NULL  false
+bar  mz_dataflow_operator_addresses  mz_dataflow_operator_addresses_4_primary_idx  2  worker  NULL  false
+bar  mz_dataflow_operator_reachability_internal  mz_dataflow_operator_reachability_internal_4_primary_idx  1  address  NULL  false
+bar  mz_dataflow_operator_reachability_internal  mz_dataflow_operator_reachability_internal_4_primary_idx  2  port  NULL  false
+bar  mz_dataflow_operator_reachability_internal  mz_dataflow_operator_reachability_internal_4_primary_idx  3  worker  NULL  false
+bar  mz_dataflow_operator_reachability_internal  mz_dataflow_operator_reachability_internal_4_primary_idx  4  update_type  NULL  false
+bar  mz_dataflow_operator_reachability_internal  mz_dataflow_operator_reachability_internal_4_primary_idx  5  timestamp  NULL  true
+bar  mz_dataflow_operators  mz_dataflow_operators_4_primary_idx  1  id  NULL  false
+bar  mz_dataflow_operators  mz_dataflow_operators_4_primary_idx  2  worker  NULL  false
+bar  mz_materialization_dependencies  mz_materialization_dependencies_4_primary_idx  1  dataflow  NULL  false
+bar  mz_materialization_dependencies  mz_materialization_dependencies_4_primary_idx  2  source  NULL  false
+bar  mz_materialization_dependencies  mz_materialization_dependencies_4_primary_idx  3  worker  NULL  false
+bar  mz_materializations  mz_materializations_4_primary_idx  1  name  NULL  false
+bar  mz_materializations  mz_materializations_4_primary_idx  2  worker  NULL  false
+bar  mz_message_counts_received_internal  mz_message_counts_received_internal_4_primary_idx  1  channel  NULL  false
+bar  mz_message_counts_received_internal  mz_message_counts_received_internal_4_primary_idx  2  source_worker  NULL  false
+bar  mz_message_counts_received_internal  mz_message_counts_received_internal_4_primary_idx  3  target_worker  NULL  false
+bar  mz_message_counts_sent_internal  mz_message_counts_sent_internal_4_primary_idx  1  channel  NULL  false
+bar  mz_message_counts_sent_internal  mz_message_counts_sent_internal_4_primary_idx  2  source_worker  NULL  false
+bar  mz_message_counts_sent_internal  mz_message_counts_sent_internal_4_primary_idx  3  target_worker  NULL  false
+bar  mz_peek_active  mz_peek_active_4_primary_idx  1  id  NULL  false
+bar  mz_peek_active  mz_peek_active_4_primary_idx  2  worker  NULL  false
+bar  mz_peek_durations  mz_peek_durations_4_primary_idx  1  worker  NULL  false
+bar  mz_peek_durations  mz_peek_durations_4_primary_idx  2  duration_ns  NULL  false
+bar  mz_scheduling_elapsed_internal  mz_scheduling_elapsed_internal_4_primary_idx  1  id  NULL  false
+bar  mz_scheduling_elapsed_internal  mz_scheduling_elapsed_internal_4_primary_idx  2  worker  NULL  false
+bar  mz_scheduling_histogram_internal  mz_scheduling_histogram_internal_4_primary_idx  1  id  NULL  false
+bar  mz_scheduling_histogram_internal  mz_scheduling_histogram_internal_4_primary_idx  2  worker  NULL  false
+bar  mz_scheduling_histogram_internal  mz_scheduling_histogram_internal_4_primary_idx  3  duration_ns  NULL  false
+bar  mz_scheduling_parks_internal  mz_scheduling_parks_internal_4_primary_idx  1  worker  NULL  false
+bar  mz_scheduling_parks_internal  mz_scheduling_parks_internal_4_primary_idx  2  slept_for  NULL  false
+bar  mz_scheduling_parks_internal  mz_scheduling_parks_internal_4_primary_idx  3  requested  NULL  false
+bar  mz_worker_materialization_frontiers  mz_worker_materialization_frontiers_4_primary_idx  1  global_id  NULL  false
+bar  mz_worker_materialization_frontiers  mz_worker_materialization_frontiers_4_primary_idx  2  worker  NULL  false
+bar  mz_worker_materialization_frontiers  mz_worker_materialization_frontiers_4_primary_idx  3  time  NULL  false
+bar  v  v_primary_idx  1  ?column?  NULL  false
+
+query TTTTTTT
+SHOW INDEXES;
+----
+bar  v  v_primary_idx  1  ?column?  NULL  false
+foo  v  foo_v_idx  1  ?column?  NULL  false
+
+query T
+SELECT
+	mz_clusters.name
+FROM
+	mz_clusters JOIN mz_indexes ON mz_clusters.id = mz_indexes.cluster_id
+WHERE
+	mz_indexes.name = 'v_primary_idx';
+----
+bar
+
+# Test invalid setting of `cluster`.
+
+# It's okay to set the `cluster` variable to an invalid cluster.
+statement ok
+SET cluster = 'bad'
+
+# But you can't do any reads on that cluster.
+statement error unknown cluster 'bad'
+SELECT * FROM v
+
+# Nor can you create indexes on that cluster.
+statement error unknown cluster 'bad'
+CREATE MATERIALIZED VIEW v2 AS SELECT 1
+
+# But you can create unmaterialized views on that cluster.
+statement ok
+CREATE VIEW unmat AS SELECT 1
+
+# Test `CREATE INDEX ... IN CLUSTER`.
+statement ok
+SET cluster = 'default'
+
+query T
+SELECT name FROM mz_indexes WHERE name NOT LIKE 'mz_%';
+----
+foo_v_idx
+v_primary_idx
+
+statement ok
+CREATE DEFAULT INDEX IN CLUSTER bar ON v
+
+query TTTTTTT
+SHOW INDEXES ON v IN CLUSTER bar;
+----
+bar v v_primary_idx 1 ?column? NULL false
+bar v v_primary_idx1 1 ?column? NULL false
+
+statement error unknown cluster 'noexist'
+CREATE DEFAULT INDEX IN CLUSTER noexist ON v
+
+# Test invalid DROPs.
+
+query T
+SHOW cluster
+----
+default
+
+statement error unknown cluster 'baz'
+DROP CLUSTER baz
+
+statement error cannot drop cluster with active indexes, sinks, or replicas
+DROP CLUSTER bar
+
+query TTTTTTT
+SHOW INDEXES IN CLUSTER bar WHERE on_name = 'v';
+----
+bar v v_primary_idx 1 ?column? NULL false
+bar v v_primary_idx1 1 ?column? NULL false
+
+statement ok
+DROP INDEX v_primary_idx
+
+statement ok
+DROP INDEX v_primary_idx1
+
+statement ok
+DROP CLUSTER REPLICA bar.r1
+
+statement ok
+DROP CLUSTER REPLICA bar.r2
+
+# Test valid DROPs
+
+statement ok
+DROP CLUSTER bar
+
+statement ok
+DROP CLUSTER foo CASCADE
+
+statement ok
+CREATE CLUSTER baz REPLICAS (r1 (REMOTE ['localhost:1234']))
+
+statement ok
+CREATE DEFAULT INDEX IN CLUSTER baz ON v
+
+statement error cannot drop cluster with active indexes, sinks, or replicas
+DROP CLUSTER baz
+
+statement ok
+DROP CLUSTER baz CASCADE
+
+query T
+SELECT name FROM mz_indexes WHERE name NOT LIKE 'mz_%';
+----
+
+# Test that dropping a cluster and re-creating it with the same name is valid if introspection sources are enabled
+statement ok
+CREATE CLUSTER foo REPLICAS (r1 (REMOTE ['localhost:1234'])), INTROSPECTION GRANULARITY '1s'
+
+statement ok
+DROP CLUSTER foo CASCADE
+
+statement ok
+CREATE CLUSTER foo REPLICAS (r1 (REMOTE ['localhost:1234'])), INTROSPECTION GRANULARITY '1s'
+
+statement ok
+DROP CLUSTER foo CASCADE
+
+# Test that bad cluster sizes don't cause a crash
+
+statement error unknown cluster replica size
+CREATE CLUSTER foo REPLICAS (a (SIZE 'lol'))
+
+statement ok
+CREATE CLUSTER foo REPLICAS (a (SIZE '1'))
+
+statement ok
+CREATE CLUSTER foo2 REPLICAS (a (SIZE '32'))
+
+statement ok
+CREATE CLUSTER foo3 REPLICAS (a (SIZE '2-2'))
+
+statement ok
+DROP CLUSTER foo, foo2, foo3 CASCADE
+
+# Test that introspection source indexes are created and dropped correctly
+
+# There are 17 introspection sources
+query I
+SELECT COUNT(name) FROM mz_indexes WHERE cluster_id = 1;
+----
+17
+
+query I
+SELECT COUNT(name) FROM mz_indexes WHERE cluster_id <> 1;
+----
+0
+
+statement ok
+CREATE CLUSTER test REPLICAS (foo (SIZE '1'));
+
+query I
+SELECT COUNT(name) FROM mz_indexes;
+----
+34
+
+statement ok
+DROP CLUSTER test CASCADE
+
+query T
+SELECT COUNT(name) FROM mz_indexes;
+----
+17
+
+statement error nvalid SIZE: must provide a string value
+CREATE CLUSTER REPLICA default.size_1 SIZE;
+
+statement ok
+CREATE CLUSTER REPLICA default.size_1 SIZE '1';
+
+query TT
+SHOW CLUSTER REPLICAS
+----
+default default_replica
+default size_1
+
+statement ok
+CREATE CLUSTER foo REPLICAS (size_1 (SIZE '1'), size_2 (SIZE '2'))
+
+query TT
+SHOW CLUSTER REPLICAS
+----
+default default_replica
+default size_1
+foo size_1
+foo size_2
+
+statement ok
+DROP CLUSTER REPLICA IF EXISTS default.bar
+
+statement ok
+DROP CLUSTER REPLICA IF EXISTS bar.foo
+
+statement ok
+DROP CLUSTER REPLICA IF EXISTS default.foo
+
+query error CLUSTER foo has no CLUSTER REPLICA named foo
+DROP CLUSTER REPLICA default.size_1, foo.foo
+
+statement ok
+DROP CLUSTER REPLICA default.size_1
+
+statement ok
+DROP CLUSTER REPLICA foo.size_1, foo.size_2
+
+query TT
+SHOW CLUSTER REPLICAS
+----
+default default_replica
+
+statement ok
+CREATE CLUSTER REPLICA default.foo_bar SIZE '1'
+
+statement ok
+DROP CLUSTER REPLICA default.foo_bar
+
+statement ok
+CREATE CLUSTER REPLICA default."foo-bar" SIZE '1'
+
+statement ok
+DROP CLUSTER REPLICA default."foo-bar"
+
+statement ok
+CREATE CLUSTER REPLICA default."好-好" SIZE '1'
+
+statement ok
+DROP CLUSTER REPLICA default."好-好"
+
+statement ok
+CREATE CLUSTER REPLICA default."好_好" SIZE '1'
+
+statement ok
+DROP CLUSTER REPLICA default."好_好"
+
+# clusters wo replicas cannot service selects
+
+statement ok
+CREATE CLUSTER empty REPLICAS ()
+
+statement ok
+SET cluster = empty
+
+query error CLUSTER "empty" has no replicas available to service request
+SELECT 1;
+
+
+# Phillip's tests
+
+statement error zero-length delimited identifier
+CREATE CLUSTER REPLICA default."" SIZE '1';
+
+statement error unknown cluster
+CREATE CLUSTER REPLICA no_such_cluster.size_1 SIZE '1';
+
+statement error invalid SIZE
+CREATE CLUSTER foo REPLICAS (size_2 (SIZE NULL));
+
+statement error unknown cluster replica size
+CREATE CLUSTER foo REPLICAS (size_2 (SIZE ''));
+
+statement error unknown cluster replica size
+CREATE CLUSTER foo REPLICAS (size_2 (SIZE 'no_such_size'));
+
+statement error invalid SIZE
+CREATE CLUSTER foo REPLICAS (size_2 (SIZE 1));
+
+statement error unknown cluster replica size a
+CREATE CLUSTER foo REPLICAS (size_2 (SIZE a));
+
+statement ok
+DROP CLUSTER foo CASCADE;
+
+statement ok
+CREATE CLUSTER foo REPLICAS (size_2 (SIZE '1'));
+
+statement ok
+SET cluster=foo
+
+statement ok
+CREATE TABLE t1 (f1 INTEGER);
+
+statement ok
+INSERT INTO t1 VALUES (1);
+
+query I
+SELECT * FROM t1;
+----
+1
+
+statement error unknown cluster
+DROP CLUSTER REPLICA no_such_cluster.bar
+
+statement ok
+RESET cluster
+
+statement ok
+DROP CLUSTER foo CASCADE
+
+# Availability zones
+# Note that we don't support availability zones configured with slt, so they
+# can't be meaningfully specified
+
+statement error unknown cluster replica availability zone a
+CREATE CLUSTER REPLICA default.replica SIZE '1', AVAILABILITY ZONE 'a'
+
+statement error AVAILABILITY ZONE specified more than once
+CREATE CLUSTER REPLICA default.replica AVAILABILITY ZONE 'a', AVAILABILITY ZONE 'b'
+
+statement error cannot specify AVAILABILITY ZONE and REMOTE
+CREATE CLUSTER REPLICA default.replica REMOTE ['host1'], AVAILABILITY ZONE 'a'
+
+statement error cannot specify AVAILABILITY ZONE and REMOTE
+CREATE CLUSTER REPLICA default.replica REMOTE ['host1'], AVAILABILITY ZONE 'a'
+
+statement error cannot specify AVAILABILITY ZONE and REMOTE
+CREATE CLUSTER REPLICA default.replica AVAILABILITY ZONE 'a', REMOTE ['host1']
+
+# Test that the contents of mz_cluster_replicas look sensible
+
+statement ok
+CREATE CLUSTER foo REPLICAS (size_1 (SIZE '1'), size_32 (SIZE '32'), size_2_2 (SIZE '2-2'))
+
+query TTT
+SELECT name, size, status FROM mz_cluster_replicas ORDER BY name
+----
+default_replica  default  unknown
+size_1           1        unknown
+size_2_2         2-2      unknown
+size_32          32       unknown
+
+statement ok
+DROP CLUSTER foo CASCADE

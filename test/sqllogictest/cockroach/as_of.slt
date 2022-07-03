@@ -1,0 +1,96 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/as_of
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+# not supported yet
+halt
+
+mode cockroach
+
+# Unlikely to support the SELECT ... AS OF SYSTEM TIME syntax exactly.
+halt
+
+statement ok
+CREATE TABLE t (i INT)
+
+statement ok
+INSERT INTO t VALUES (2)
+
+# Verify strings can be parsed as intervals.
+query I
+SELECT * FROM t AS OF SYSTEM TIME '-1us'
+----
+2
+
+# Verify a forced interval type works.
+query I
+SELECT * FROM t AS OF SYSTEM TIME INTERVAL '-1us'
+----
+2
+
+# Verify that we can use computed expressions.
+query I
+SELECT * FROM t AS OF SYSTEM TIME -( ('1000' || 'us')::INTERVAL )
+----
+2
+
+statement error pq: AS OF SYSTEM TIME: only constant expressions or experimental_follower_read_timestamp are allowed
+SELECT * FROM t AS OF SYSTEM TIME cluster_logical_timestamp()
+
+statement error pq: subqueries are not allowed in AS OF SYSTEM TIME
+SELECT * FROM t AS OF SYSTEM TIME (SELECT '-1h'::INTERVAL)
+
+statement error pq: relation "t" does not exist
+SELECT * FROM t AS OF SYSTEM TIME '-1h'
+
+statement error pq: experimental_follower_read_timestamp\(\): experimental_follower_read_timestamp is only available in ccl distribution
+SELECT * FROM t AS OF SYSTEM TIME experimental_follower_read_timestamp()
+
+statement error pq: unknown signature: experimental_follower_read_timestamp\(string\) \(desired <timestamptz>\)
+SELECT * FROM t AS OF SYSTEM TIME experimental_follower_read_timestamp('boom')
+
+statement error pq: AS OF SYSTEM TIME: only constant expressions or experimental_follower_read_timestamp are allowed
+SELECT * FROM t AS OF SYSTEM TIME now()
+
+statement error cannot specify timestamp in the future
+SELECT * FROM t AS OF SYSTEM TIME '10s'
+
+# Verify that the TxnTimestamp used to generate now() and current_timestamp() is
+# set to the historical timestamp.
+
+query T
+SELECT * FROM (SELECT now()) AS OF SYSTEM TIME '2018-01-01'
+----
+2018-01-01 00:00:00 +0000 UTC
+
+# Verify that zero intervals indistinguishable from zero cause an error.
+
+statement error pq: AS OF SYSTEM TIME: interval value '0.1us' too small, must be <= -1µs
+SELECT * FROM t AS OF SYSTEM TIME '0.1us'
+
+statement error pq: AS OF SYSTEM TIME: interval value '0,0' too small, must be <= -1µs
+SELECT * FROM t AS OF SYSTEM TIME '0,0'
+
+statement error pq: AS OF SYSTEM TIME: interval value '0.000000000,0' too small, must be <= -1µs
+SELECT * FROM t AS OF SYSTEM TIME '0.000000000,0'
+
+statement error pq: AS OF SYSTEM TIME: interval value '-0.1us' too small, must be <= -1µs
+SELECT * FROM t AS OF SYSTEM TIME '-0.1us'
+
+statement error pq: AS OF SYSTEM TIME: zero timestamp is invalid
+SELECT * FROM t AS OF SYSTEM TIME '0'

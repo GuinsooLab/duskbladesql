@@ -1,0 +1,96 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+mode cockroach
+
+statement ok
+CREATE TABLE foo (a integer)
+
+statement ok
+INSERT INTO foo VALUES (37)
+
+statement ok
+CREATE TABLE bar (a integer, b integer)
+
+statement ok
+INSERT INTO bar VALUES (37, 42), (37, 42)
+
+query II
+SELECT *, count(*) FROM foo GROUP BY a
+----
+37 1
+
+query II
+SELECT *, count(*) FROM foo GROUP BY a, a, a + 1
+----
+37 1
+
+query I
+SELECT a FROM foo GROUP BY a, foo.a
+----
+37
+
+statement error column "bar.b" must appear in the GROUP BY clause or be used in an aggregate function
+SELECT *, count(*) FROM bar GROUP BY a
+
+query II
+SELECT a, count(*) FROM bar GROUP BY a
+----
+37 2
+
+query II
+SELECT * FROM bar GROUP BY a, b
+----
+37 42
+
+statement ok
+CREATE TABLE quux (a integer)
+
+query I
+SELECT count(a) FROM quux WHERE a < 0
+----
+0
+
+query I
+SELECT count(*) FROM quux WHERE a < 0
+----
+0
+
+statement ok
+INSERT INTO quux VALUES (37), (NULL)
+
+query I
+SELECT count(*) FROM quux
+----
+2
+
+query I
+SELECT count(a) FROM quux
+----
+1
+
+query I
+SELECT count(a) FROM quux WHERE a < 0
+----
+0
+
+query I
+SELECT count(*) FROM quux WHERE a < 0
+----
+0
+
+query I
+SELECT sum(a) FROM quux
+----
+37
+
+query I
+SELECT sum(a) FROM quux WHERE a < 0
+----
+NULL

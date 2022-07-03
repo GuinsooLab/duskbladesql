@@ -1,0 +1,616 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+mode cockroach
+
+statement ok
+CREATE TABLE t (a int, b int)
+
+statement ok
+INSERT INTO t (a, b) VALUES (1, 1), (1, 2), (2, 3), (3, 1)
+
+query error aggregate functions are not allowed in WHERE clause
+SELECT a FROM t WHERE sum(b) = 3 GROUP BY a
+
+query error column "t.b" must appear in the GROUP BY clause or be used in an aggregate function
+SELECT b FROM t GROUP BY a
+
+query error column "t.b" must appear in the GROUP BY clause or be used in an aggregate function
+SELECT 1 FROM t GROUP BY a ORDER BY b
+
+query error column "t.b" must appear in the GROUP BY clause or be used in an aggregate function
+SELECT 1 FROM t GROUP BY a HAVING b > 0
+
+query error column "t.b" must appear in the GROUP BY clause or be used in an aggregate function
+SELECT DISTINCT ON (b) a FROM t GROUP BY a ORDER BY b
+
+query error column "t.b" must appear in the GROUP BY clause or be used in an aggregate function
+SELECT t.b FROM t GROUP BY a
+
+query error column "c" does not exist
+SELECT c FROM t GROUP BY a
+
+query error column "t.c" does not exist
+SELECT t.c FROM t GROUP BY a
+
+query IIIR colnames
+SELECT 1 AS literal, sum(a) as sum_a, sum(b), avg(a) FROM t
+----
+literal  sum_a  sum  avg
+1        7      7    1.75
+
+query I rowsort
+SELECT a FROM t GROUP BY a HAVING sum(b) = 3
+----
+1
+2
+
+query I rowsort
+SELECT a + 1 FROM t GROUP BY a + 1 HAVING sum(b) = 3
+----
+2
+3
+
+# Simple column names in GROUP BY can refer to columns from the output list...
+query TII rowsort
+SELECT 'dummy', a AS c, sum(b) FROM t GROUP BY c
+----
+dummy 1 3
+dummy 2 3
+dummy 3 1
+
+# ...unless they are ambiguous...
+query error column reference "c" is ambiguous
+SELECT a AS c, sum(b) AS c FROM t GROUP BY c
+
+# ...although ambiguity between the input list and the output list is not an
+# error; the column in the input list is preferred.
+query II rowsort
+SELECT a, sum(b) AS a FROM t GROUP BY a
+----
+1 3
+2 3
+3 1
+
+query I
+SELECT a FROM t GROUP BY t.a, t.a
+----
+1
+2
+3
+
+query I
+SELECT a FROM t GROUP BY t.a, public.t.a
+----
+1
+2
+3
+
+# Smoke test to make sure multiple accumulable and hierarchical reductions work
+query IIIII rowsort
+SELECT a, count(b), min(b), sum(b), max(b) FROM t GROUP BY a
+----
+1 2 1 3 2
+2 1 3 3 3
+3 1 1 1 1
+
+# Test that hinting the group size works
+query II rowsort
+SELECT a, sum(b) AS a FROM t GROUP BY a OPTION(expected_group_size = 100)
+----
+1 3
+2 3
+3 1
+
+# unless hint is bad
+query error expected_group_size must be a number
+SELECT a, sum(b) AS a FROM t GROUP BY a OPTION(expected_group_size = 'foo')
+
+query error
+SELECT a, sum(b) AS a FROM t GROUP BY a OPTION(expected_group_size = 0.1)
+
+# Test that an ordinal in a GROUP BY that refers to a column that is an
+# expression, rather than a simple column reference, works.
+query IT rowsort
+SELECT 2 * a, sum(b) FROM t GROUP BY 1
+----
+2  3
+4  3
+6  1
+
+query TTT colnames
+SHOW COLUMNS FROM t
+----
+name  nullable  type
+ a    true      integer
+ b    true      integer
+
+# Tests on int8 sums to make sure we handle overflow and underflow correctly
+
+statement ok
+CREATE TABLE t_bigint (a bigint, b bigint)
+
+statement ok
+INSERT INTO t_bigint (a, b) VALUES (1, 1), (1, 2), (2, 9223372036854775807), (2, 9223372036854775807), (3, -9223372036854775808), (3, -9223372036854775808)
+
+query II rowsort
+SELECT a, sum(b) FROM t_bigint GROUP BY a
+----
+1 3
+2 18446744073709551614
+3 -18446744073709551616
+
+query T colnames
+SELECT pg_typeof(sum(b)) FROM t_bigint
+----
+pg_typeof
+numeric
+
+query TT colnames
+SELECT pg_typeof(a) as a_type, pg_typeof(b) as b_type FROM t_bigint GROUP BY a_type, b_type
+----
+a_type b_type
+bigint bigint
+
+# Tests to make sure reduce elision works correctly
+
+statement ok
+CREATE TABLE agg_pk (a INT PRIMARY KEY, b INT, c BIGINT)
+
+statement ok
+INSERT INTO agg_pk VALUES (1, 2, 3), (2, 3, 4), (3, 4, 5)
+
+query II
+SELECT a, sum(b) from agg_pk group by a order by a
+----
+1 2
+2 3
+3 4
+
+query T multiline
+EXPLAIN PLAN FOR SELECT a, sum(b) from agg_pk group by a
+----
+Source materialize.public.agg_pk (u3):
+| Project (#0, #1)
+
+Query:
+%0 =
+| Get materialize.public.agg_pk (u3)
+| Map i32toi64(#1)
+| Project (#0, #3)
+
+EOF
+
+query II
+SELECT a, sum(c) from agg_pk group by a order by a
+----
+1 3
+2 4
+3 5
+
+query T multiline
+EXPLAIN PLAN FOR SELECT a, sum(c) from agg_pk group by a
+----
+Source materialize.public.agg_pk (u3):
+| Project (#0, #2)
+
+Query:
+%0 =
+| Get materialize.public.agg_pk (u3)
+| Map i64tonumeric(#2)
+| Project (#0, #3)
+
+EOF
+
+# avg on an integer column should return a decimal with the default decimal
+# division scale increase.
+
+query R
+SELECT avg(a) FROM t
+----
+1.75
+
+# But avg on a float column should return a float.
+
+statement ok
+CREATE TABLE t2 (a float)
+
+statement ok
+INSERT INTO t2 VALUES (1.0), (1.0), (2.0), (3.0)
+
+query R
+SELECT avg(a) FROM t2
+----
+1.75
+
+# avg of an explicit NULL should return an error.
+
+query error unable to determine which implementation to use
+SELECT avg(NULL)
+
+statement error
+SELECT * ORDER BY SUM(fake_column)
+
+query RRRRRR colnames
+SELECT variance(a), var_samp(a), var_pop(a), stddev(a), stddev_samp(a), stddev_pop(a) FROM t
+----
+variance        var_samp        var_pop         stddev          stddev_samp     stddev_pop
+0.916666666666666666666666666666666666667  0.916666666666666666666666666666666666667  0.6875  0.957427107756338109975101911369821553037  0.957427107756338109975101911369821553037  0.829156197588849962278733184167671670982
+
+query RRRRRR
+SELECT variance(a), var_samp(a), var_pop(a), stddev(a), stddev_samp(a), stddev_pop(a) FROM t2
+----
+0.9166666666666666  0.9166666666666666  0.6875  0.9574271077563381  0.9574271077563381  0.82915619758885
+
+# TODO(benesch): these filter tests are copied from cockroach/aggregate.slt;
+# remove them from here when we can run that file in its entirely.
+
+statement ok
+CREATE TABLE filter_test (
+  k INT,
+  v INT,
+  mark BOOL
+)
+
+statement OK
+INSERT INTO filter_test VALUES
+(1, 2, false),
+(3, 4, true),
+(5, NULL, true),
+(6, 2, true),
+(7, 2, true),
+(8, 4, true),
+(NULL, 4, true)
+
+# FILTER should eliminate some results.
+query II rowsort
+SELECT v, count(*) FILTER (WHERE k > 5) FROM filter_test GROUP BY v
+----
+2 2
+4 1
+NULL 0
+
+# Test multiple filters
+query IBIII rowsort
+SELECT v, mark, count(*) FILTER (WHERE k > 5), count(*), max(k) FILTER (WHERE k < 8) FROM filter_test GROUP BY v, mark
+----
+2 false 0 1 1
+2 true 2 2 7
+4 true 1 3 3
+NULL true 0 1 5
+
+query error FILTER specified, but abs is not an aggregate function
+SELECT abs(1) FILTER (WHERE false)
+
+query error Expected end of statement, found left parenthesis
+SELECT column1 FILTER (WHERE column1 = 1) FROM (VALUES (1))
+
+query error aggregate functions are not allowed in FILTER
+SELECT v, count(*) FILTER (WHERE count(1) > 5) FROM filter_test GROUP BY v
+
+# These filter tests are Materialize-specific.
+
+# Test avg, which needs to propgate the filter through its implementation.
+query IR rowsort
+SELECT v, avg(k) FILTER (WHERE k > 5) FROM filter_test GROUP BY v
+----
+2 6.5
+4 8
+NULL NULL
+
+# Similarly for variance and stddev.
+query IRR rowsort
+SELECT v, variance(k) FILTER (WHERE k > 5), stddev(k) FILTER (WHERE k > 5) FROM filter_test GROUP BY v
+----
+2  0.5  0.707106781186547524400844362104849039285
+4  NULL  NULL
+NULL  NULL  NULL
+
+
+# Multiple tests related to distinctness of aggregates on constants (issue #2535)
+query I rowsort
+select count(distinct column1) from (values (1)) _;
+----
+1
+
+query I rowsort
+select count(distinct column1) from (values (1), (2), (1), (4)) _;
+----
+3
+
+query I rowsort
+select sum(distinct column1) from (values (1), (2), (1), (4)) _;
+----
+7
+
+query error count\(\*\) must be used to call a parameterless aggregate function
+SELECT count()
+
+query error arguments cannot be implicitly cast to any implementation's parameters
+SELECT sum(*)
+
+# Ensure int2 has its own max implementation
+query I
+SELECT max(column1) FROM (VALUES (1::int2), (-1::int2));
+----
+1
+
+query T
+SELECT pg_typeof(max(column1)) FROM (VALUES (1::int2), (-1::int2));
+----
+smallint
+
+# ORDER BY
+
+query TTTT
+WITH
+    v (a, b)
+        AS (
+            VALUES
+                ('a', 1),
+                ('b', 2),
+                ('c', 0),
+                ('d', 2)
+        )
+SELECT
+    list_agg(a ORDER BY a DESC)::text AS a_desc,
+    list_agg(a ORDER BY b)::text AS b,
+    list_agg(a ORDER BY b, a ASC)::text AS b_a_asc,
+    list_agg(a ORDER BY b, a DESC)::text AS b_a_desc
+FROM
+    v
+----
+{d,c,b,a}  {c,a,b,d}  {c,a,b,d}  {c,a,d,b}
+
+query TTTTT
+WITH
+    v (a, b)
+        AS (
+            VALUES
+                ('a', 1),
+                ('b', 2),
+                ('c', 0),
+                ('d', 2),
+                ('e', NULL)
+        )
+SELECT
+    array_agg(a ORDER BY a DESC)::text AS a_desc,
+    array_agg(a ORDER BY b)::text AS b,
+    array_agg(a ORDER BY b, a ASC)::text AS b_a_asc,
+    array_agg(a ORDER BY b, a DESC)::text AS b_a_desc,
+    array_agg(a ORDER BY b NULLS FIRST, a DESC)::text AS b_a_desc_nulls_first
+FROM
+    v
+----
+{e,d,c,b,a}  {c,a,b,d,e}  {c,a,b,d,e}  {c,a,d,b,e}  {e,c,a,d,b}
+
+query TTTT
+WITH
+    v (a, b)
+        AS (
+            VALUES
+                ('a', 1),
+                ('b', 2),
+                ('c', 0),
+                ('d', 2)
+        )
+SELECT
+    string_agg(a, '-' ORDER BY a DESC)::text AS a_desc,
+    string_agg(a, '-' ORDER BY b)::text AS b,
+    string_agg(a, '-' ORDER BY b, a ASC)::text AS b_a_asc,
+    string_agg(a, '-' ORDER BY b, a DESC)::text AS b_a_desc
+FROM
+    v
+----
+d-c-b-a c-a-b-d c-a-b-d c-a-d-b
+
+query TTTT
+WITH
+    v (a, b)
+        AS (
+            VALUES
+                ('a', 1),
+                ('b', 2),
+                ('c', 0),
+                ('d', 2)
+        )
+SELECT
+    jsonb_agg(a ORDER BY a DESC)::text AS a_desc,
+    jsonb_agg(a ORDER BY b)::text AS b,
+    jsonb_agg(a ORDER BY b, a ASC)::text AS b_a_asc,
+    jsonb_agg(a ORDER BY b, a DESC)::text AS b_a_desc
+FROM
+    v
+----
+["d","c","b","a"]  ["c","a","b","d"]  ["c","a","b","d"]  ["c","a","d","b"]
+
+query TTTT
+WITH
+    v (a, b)
+        AS (
+            VALUES
+                ('a', 1),
+                ('b', 2),
+                ('c', 0),
+                ('d', 2)
+        )
+SELECT
+    jsonb_object_agg(b, a ORDER BY a DESC)::text AS a_desc,
+    jsonb_object_agg(b, a ORDER BY b)::text AS b,
+    jsonb_object_agg(b, a ORDER BY b, a ASC)::text AS b_a_asc,
+    jsonb_object_agg(b, a ORDER BY b, a DESC)::text AS b_a_desc
+FROM
+    v
+----
+{"0":"c","1":"a","2":"b"}  {"0":"c","1":"a","2":"d"}  {"0":"c","1":"a","2":"d"}  {"0":"c","1":"a","2":"b"}
+
+
+# Test Reduction elision
+
+statement ok
+CREATE TABLE a (x text)
+
+statement ok
+INSERT INTO a VALUES ('a'),('b')
+
+statement ok
+CREATE TABLE qs (q int not null)
+
+query T
+SELECT STRING_AGG(x, ',') FROM (SELECT * FROM a ORDER BY x);
+----
+a,b
+
+query T
+SELECT STRING_AGG(x, ',') FROM (SELECT * FROM a ORDER BY x limit 1);
+----
+a
+
+query T
+SELECT STRING_AGG(x, ',') FROM (SELECT * FROM (SELECT 'a' as x UNION ALL SELECT 'b' as x) ORDER BY x)
+----
+a,b
+
+query T
+SELECT STRING_AGG(x, ',') FROM (SELECT * FROM (SELECT 'a' as x UNION ALL SELECT 'b' as x) ORDER BY x limit 1)
+----
+a
+
+query T
+SELECT STRING_AGG(x, ',') from (SELECT TRUE::text as x FROM(SELECT AVG(0) FROM qs))
+----
+true
+
+query T
+SELECT LIST_AGG(x)::text FROM (SELECT * FROM a ORDER BY x)
+----
+{a,b}
+
+query T
+SELECT LIST_AGG(x)::text FROM (SELECT * FROM a ORDER BY x limit 1)
+----
+{a}
+
+query T
+SELECT LIST_AGG(x)::text FROM (SELECT * FROM (SELECT 'a' as x UNION ALL SELECT 'b' as x) ORDER BY x)
+----
+{a,b}
+
+query T
+SELECT LIST_AGG(x)::text FROM (SELECT * FROM (SELECT 'a' as x UNION ALL SELECT 'b' as x) ORDER BY x limit 1)
+----
+{a}
+
+query T
+SELECT LIST_AGG(x)::text from (SELECT TRUE::text as x FROM(SELECT AVG(0) FROM qs))
+----
+{true}
+
+query T
+SELECT ARRAY_AGG(x) FROM (SELECT * FROM a ORDER BY x)
+----
+{a,b}
+
+query T
+SELECT ARRAY_AGG(x) FROM (SELECT * FROM a ORDER BY x limit 1)
+----
+{a}
+
+query T
+SELECT ARRAY_AGG(x) FROM (SELECT * FROM (SELECT 'a' as x UNION ALL SELECT 'b' as x) ORDER BY x)
+----
+{a,b}
+
+query T
+SELECT ARRAY_AGG(x) FROM (SELECT * FROM (SELECT 'a' as x UNION ALL SELECT 'b' as x) ORDER BY x limit 1)
+----
+{a}
+
+query T
+SELECT ARRAY_AGG(x) from (SELECT TRUE::text as x FROM(SELECT AVG(0) FROM qs))
+----
+{true}
+
+query T
+SELECT JSONB_AGG(x) FROM (SELECT * FROM a ORDER BY x)
+----
+["a","b"]
+
+query T
+SELECT JSONB_AGG(x) FROM (SELECT * FROM a ORDER BY x limit 1)
+----
+["a"]
+
+query T
+SELECT JSONB_AGG(x) FROM (SELECT * FROM (SELECT 'a' as x UNION ALL SELECT 'b' as x) ORDER BY x)
+----
+["a","b"]
+
+query T
+SELECT JSONB_AGG(x) FROM (SELECT * FROM (SELECT 'a' as x UNION ALL SELECT 'b' as x) ORDER BY x limit 1)
+----
+["a"]
+
+query T
+SELECT JSONB_AGG(x) from (SELECT TRUE::text as x FROM(SELECT AVG(0) FROM qs))
+----
+["true"]
+
+query T
+SELECT JSONB_OBJECT_AGG(a,b) FROM (SELECT * FROM t ORDER BY a)
+----
+{"1":2,"2":3,"3":1}
+
+query T
+SELECT JSONB_OBJECT_AGG(a,b) FROM (SELECT * FROM t ORDER BY a limit 1)
+----
+{"1":1}
+
+query T
+SELECT JSONB_OBJECT_AGG(a,b) FROM (SELECT * FROM (SELECT 'a' as a,'b' as b UNION ALL SELECT 'c' as a,'d' as b) ORDER by a)
+----
+{"a":"b","c":"d"}
+
+query T
+SELECT JSONB_OBJECT_AGG(a,b) FROM (SELECT * FROM (SELECT 'a' as a,'b' as b UNION ALL SELECT 'c' as a,'d' as b) ORDER by a limit 1)
+----
+{"a":"b"}
+
+query T
+SELECT JSONB_OBJECT_AGG(a,b) from (SELECT TRUE::text as a, FALSE::text as b FROM(SELECT AVG(0) FROM qs))
+----
+{"true":"false"}
+
+query TI
+SELECT a.*, ROW_NUMBER() over () FROM (SELECT * FROM a ORDER BY x) a
+----
+a  1
+b  2
+
+query TI
+SELECT a.*, ROW_NUMBER() over () FROM (SELECT * FROM a ORDER BY x limit 1) a
+----
+a  1
+
+
+query TI
+SELECT a.*, ROW_NUMBER() OVER() FROM (SELECT * FROM (SELECT 'a' as x UNION ALL SELECT 'b' as x) ORDER BY x) a
+----
+a  1
+b  2
+
+query TI
+SELECT a.*, ROW_NUMBER() OVER() FROM (SELECT * FROM (SELECT 'a' as x UNION ALL SELECT 'b' as x) ORDER BY x limit 1) a
+----
+a  1
+
+query TI
+SELECT a.*, ROW_NUMBER() OVER() from (SELECT TRUE::text as x FROM(SELECT AVG(0) FROM qs)) a
+----
+true 1

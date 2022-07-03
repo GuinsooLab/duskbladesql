@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# pyactivate — runs a script in the Materialize Python virtualenv.
+
+import logging
+import os
+import platform
+import subprocess
+import sys
+import venv
+from pathlib import Path
+from typing import List, Optional
+
+logger = logging.getLogger("bootstrap")
+
+
+def main(args: List[str]) -> int:
+    logging.basicConfig(level=os.environ.get("MZ_DEV_LOG", "WARNING").upper())
+    logger.debug("args={}".format(args))
+
+    # Validate Python version.
+    if sys.hexversion < 0x03090000:
+        print("fatal: python v3.9.0+ required", file=sys.stderr)
+        print(
+            " hint: you have v{}.{}.{}".format(
+                sys.version_info.major, sys.version_info.minor, sys.version_info.micro
+            ),
+            file=sys.stderr,
+        )
+        return 1
+
+    root_dir = Path(__file__).parent.parent
+    py_dir = root_dir / "misc" / "python"
+    logger.debug("root_dir={} py_dir={}".format(root_dir, py_dir))
+
+    # If we're not in the CI builder container, activate a virtualenv with the
+    # necessary dependencies.
+    if os.environ.get("MZ_DEV_CI_BUILDER"):
+        python = "python3"
+    else:
+        python = str(activate_venv(py_dir))
+    logger.debug("python={}".format(python))
+
+    # Reinvoke with the interpreter from the virtualenv.
+    py_path = str(py_dir.resolve())
+    os.environ["PYTHONPATH"] = py_path
+    os.environ["MYPYPATH"] = f"{py_path}:{py_path}/stubs"
+    os.environ["MZ_ROOT"] = str(root_dir.resolve())
+    os.execvp(python, [python, *args])
+
+
+def activate_venv(py_dir: Path) -> Path:
+    """Bootstrap and activate a virtualenv at py_dir/venv."""
+    venv_dir = py_dir / "venv"
+    stamp_path = venv_dir / "dep_stamp"
+    bin_dir = venv_dir / "bin"
+    python = bin_dir / "python"
+    logger.debug("venv_dir={} python={}".format(venv_dir, python))
+
+    # Create a virtualenv, if necessary. virtualenv creation is not atomic, so
+    # we don't want to assume the presence of a `venv` directory means that we
+    # have a working virtualenv. Instead we use the presence of the
+    # `stamp_path`, as that indicates the virtualenv was once working enough to
+    # have dependencies installed into it.
+    try:
+        os.stat(stamp_path)
+        subprocess.check_call([python, "-c", ""])
+    except Exception as e:
+        print("==> Checking for existing virtualenv", file=sys.stderr)
+        if isinstance(e, FileNotFoundError):
+            print("no existing virtualenv detected", file=sys.stderr)
+        else:
+            # Usually just an indication that the user has upgraded the system
+            # Python that the virtualenv is referring to. Not important to
+            # bubble up the error here. If it's persistent, it'll occur in the
+            # new virtual env and bubble up when we exec later.
+            print(
+                "warning: existing virtualenv is unable to execute python; will recreate",
+                file=sys.stderr
+            )
+            logger.info(f"python exec error: {e}")
+        print("==> Initializing virtualenv in {}".format(venv_dir), file=sys.stderr)
+        # Install Python into the virtualenv via a symlink rather than copying,
+        # except on Windows. This matches the behavior of the `python -m venv`
+        # command line tool. This is important on macOS, where the default
+        # `symlinks=False` is broken with the system Python.
+        # See: https://bugs.python.org/issue38705
+        symlinks = os.name != "nt"
+        venv.create(venv_dir, with_pip=True, clear=True, symlinks=symlinks)
+        # Work around a Debian bug which incorrectly makes pip think that we've
+        # installed wheel in the virtual environment when we haven't. This is
+        # a no-op on systems without the bug.
+        # See: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=959997
+        for path in venv_dir.glob("share/python-wheels/wheel*"):
+            path.unlink()
+
+    # The Python that ships with Xcode 12 is broken and attempts to compile
+    # Python extensions for ARM when it shouldn't. Detect this known-broken
+    # Python and manually override the architecture to x86_64.
+    # For context, see https://github.com/gorakhargosh/watchdog/issues/689.
+    # (The failing package for us is regex, not watchdog, but the underlying
+    # issue is the same.)
+    if (
+        sys.executable == "/Applications/Xcode.app/Contents/Developer/usr/bin/python3"
+        and platform.machine() == "x86_64"
+        and platform.python_version() == "3.8.2"
+    ):
+        os.environ["ARCHFLAGS"] = "-arch x86_64"
+
+    # The version of pip and setuptools installed into the virtualenv by default
+    # may have bugs like pypa/pip#9138 that cause them to e.g. fail to install
+    # wheels. So the first thing we do is upgrade these dependencies to known
+    # versions. This won't help if they're so broken that they can't upgrade
+    # themselves, but in that case there's nothing we can do.
+    #
+    # Note also that we don't ask for PEP 517 until we've installed a version of
+    # pip that we know supports the flag.
+    acquire_deps(venv_dir, "core")
+    acquire_deps(venv_dir, use_pep517=True)
+
+    # The virtualenv's `bin` dir takes precedence over all existing PATH
+    # entries. This is normally handled by the `activate` shell script, but
+    # we won't be calling that.
+    os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ["PATH"]
+
+    return python
+
+
+def acquire_deps(venv_dir: Path, variant: Optional[str] = None, use_pep517: bool = False) -> None:
+    """Install normal/development dependencies into the virtualenv.
+
+    If the use_pep517 flag is set, the `--use-pep517` flag is pased to `pip
+    install` to force use of new PEP 517-based build systems rather than legacy
+    setuptools build systems. This prevents pip from printing a scary warning
+    about "using legacy 'setup.py install'".
+    See: https://github.com/pypa/pip/issues/8102
+    """
+
+    stamp_path = venv_dir / (f"{variant}_dep_stamp" if variant else "dep_stamp")
+
+    # Check when dependencies were last installed.
+    try:
+        stamp_mtime = os.path.getmtime(stamp_path)
+    except FileNotFoundError:
+        stamp_mtime = 0
+    logger.debug("stamp_path={} stamp_mtime={}".format(stamp_path, stamp_mtime))
+
+    # Check when the requirements file was last modified.
+    requirements_path = venv_dir.parent / (
+        f"requirements-{variant}.txt" if variant else "requirements.txt"
+    )
+    requirements_mtime = os.path.getmtime(requirements_path)
+    logger.debug(
+        "requirements_path={} requirements_mtime={}".format(
+            requirements_path, requirements_mtime
+        )
+    )
+
+    # Update dependencies, if necessary.
+    if stamp_mtime <= requirements_mtime:
+        print("==> Updating {}dependencies with pip".format(variant + " " if variant else ""), file=sys.stderr)
+        subprocess.check_call([
+            venv_dir / "bin" / "pip", "install", "-r", requirements_path,
+            "--disable-pip-version-check",
+            *(["--use-pep517"] if use_pep517 else [])
+        ],
+            stdout=sys.stderr
+        )
+        stamp_path.touch()
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

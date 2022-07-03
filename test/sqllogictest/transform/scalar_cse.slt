@@ -1,0 +1,119 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+# This file contains tests for the Scalar CSE transforms.
+
+statement ok
+CREATE TABLE x (a string, b int not null)
+
+query T multiline
+EXPLAIN PLAN FOR SELECT b*b*b, b*b FROM x
+----
+Source materialize.public.x (u1):
+| Project (#1)
+
+Query:
+%0 =
+| Get materialize.public.x (u1)
+| Map (#1 * #1), (#2 * #1)
+| Project (#3, #2)
+
+EOF
+
+query T multiline
+EXPLAIN PLAN FOR SELECT b*b*b, b*b+1 FROM x
+----
+Source materialize.public.x (u1):
+| Project (#1)
+
+Query:
+%0 =
+| Get materialize.public.x (u1)
+| Map (#1 * #1), (#2 * #1), (#2 + 1)
+| Project (#3, #4)
+
+EOF
+
+query T multiline
+EXPLAIN PLAN FOR SELECT
+    a::json->'Field1',
+    a::json->'Field2',
+    a::json->'Field3'
+FROM x
+----
+Source materialize.public.x (u1):
+| Project (#0)
+
+Query:
+%0 =
+| Get materialize.public.x (u1)
+| Map strtojsonb(#0), (#2 -> "Field1"), (#2 -> "Field2"), (#2 -> "Field3")
+| Project (#3..=#5)
+
+EOF
+
+query T multiline
+EXPLAIN PLAN FOR SELECT
+    a::json->'Field1'->'Foo',
+    a::json->'Field1'->'Bar',
+    a::json->'Field2'->'Baz',
+    a::json->'Field2'->'Quux'->'Zorb'
+FROM x
+----
+Source materialize.public.x (u1):
+| Project (#0)
+
+Query:
+%0 =
+| Get materialize.public.x (u1)
+| Map strtojsonb(#0), (#2 -> "Field1"), (#3 -> "Foo"), (#3 -> "Bar"), (#2 -> "Field2"), (#6 -> "Baz"), ((#6 -> "Quux") -> "Zorb")
+| Project (#4, #5, #7, #8)
+
+EOF
+
+
+# Ensure we don't inline if-guarded expressions
+query T multiline
+EXPLAIN PLAN FOR SELECT
+    CASE WHEN b = 0 THEN 0 ELSE 1/b END,
+    CASE WHEN b != 0 THEN 1/b ELSE 0 END
+FROM x
+----
+Source materialize.public.x (u1):
+| Project (#1)
+
+Query:
+%0 =
+| Get materialize.public.x (u1)
+| Map if (#1 = 0) then {0} else {(1 / #1)}, if (#1 != 0) then {(1 / #1)} else {0}
+| Project (#2, #3)
+
+EOF
+
+
+
+# Ensure we update columns references in if-guarded expressions
+query T multiline
+EXPLAIN PLAN FOR SELECT
+    CASE WHEN b = 0 THEN 0 ELSE 1/b END,
+    CASE WHEN b != 0 THEN 1/b ELSE 0 END
+FROM
+    (SELECT b/2 as b FROM x)
+
+----
+Source materialize.public.x (u1):
+| Project (#1)
+
+Query:
+%0 =
+| Get materialize.public.x (u1)
+| Map (#1 / 2), if (#2 = 0) then {0} else {(1 / #2)}, if (#2 != 0) then {(1 / #2)} else {0}
+| Project (#3, #4)
+
+EOF

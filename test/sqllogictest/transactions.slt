@@ -1,0 +1,472 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+mode cockroach
+
+statement ok
+CREATE TABLE t (a int)
+
+statement ok
+INSERT INTO t (a) VALUES (1)
+
+#### next transaction
+
+statement ok
+BEGIN
+
+query I rowsort
+SELECT * FROM t
+----
+1
+
+statement ok
+COMMIT
+
+#### next transaction
+
+statement ok
+BEGIN
+
+query I rowsort
+SELECT * FROM t
+----
+1
+
+statement ok
+ROLLBACK
+
+#### next transaction
+
+statement ok
+START TRANSACTION
+
+query I rowsort
+SELECT * FROM t
+----
+1
+
+statement ok
+COMMIT
+
+#### next transaction
+
+statement ok
+START TRANSACTION
+
+query I rowsort
+SELECT * FROM t
+----
+1
+
+statement ok
+ROLLBACK
+
+# Multiple INSERTs.
+simple
+INSERT INTO t VALUES (2);
+INSERT INTO t VALUES (3);
+----
+COMPLETE 1
+COMPLETE 1
+
+# INSERT in explicit transactions.
+statement ok
+BEGIN
+
+simple
+INSERT INTO t VALUES (4);
+----
+COMPLETE 1
+
+# Verify ROLLBACK works by not expecting 4 below.
+statement ok
+ROLLBACK
+
+# INSERT rolled up from implicit txn into explicit not ok because mixed
+# with a read.
+simple
+INSERT INTO t VALUES (5);
+BEGIN;
+SELECT 1;
+----
+db error: ERROR: transaction in write-only mode
+
+# This COMMIT should be ignored due to the failure above.
+statement ok
+COMMIT
+
+# INSERT allowed in explicit transactions.
+simple
+BEGIN; INSERT INTO t VALUES (6);
+----
+COMPLETE 0
+COMPLETE 1
+
+# Verify that the to-be-inserted data is not readable by another connection.
+simple conn=read
+SELECT * FROM t WHERE a=6
+----
+COMPLETE 0
+
+statement ok
+COMMIT
+
+simple
+INSERT INTO t VALUES (7), (8)
+----
+COMPLETE 2
+
+# Verify contents of table at the end.
+query I
+SELECT * FROM t ORDER BY a
+----
+1
+2
+3
+6
+7
+8
+
+# The only thing we support multiple of in an implicit transaction
+# (multiple statements in the same query string) is row-returning
+# statements.
+simple
+CREATE TABLE u (i INT); SELECT 1;
+----
+db error: ERROR: CREATE TABLE u (i int4) cannot be run inside a transaction block
+
+# Multiple reads in the same query string are ok.
+simple
+SELECT 1; SELECT 2
+----
+1
+COMPLETE 1
+2
+COMPLETE 1
+
+# Verify that `SHOW` queries work in transactions.
+
+simple
+BEGIN
+----
+COMPLETE 0
+
+query T rowsort
+SHOW TABLES
+----
+t
+
+simple
+COMMIT
+----
+COMPLETE 0
+
+# Regression for #5725
+statement ok
+CREATE TABLE t5727 (i INT)
+
+simple
+BEGIN;
+INSERT INTO t VALUES (1);
+----
+COMPLETE 0
+COMPLETE 1
+
+simple conn=drop
+DROP TABLE t
+----
+COMPLETE 0
+
+simple
+COMMIT
+----
+db error: ERROR: unknown catalog item 'u1'
+
+# Verify TAIL must be only read statement in a transaction.
+# We use FETCH 0 with TAIL below so that we don't need to worry about
+# timestamps in this slt file.
+
+statement ok
+CREATE TABLE t (a int)
+
+statement ok
+INSERT INTO t VALUES (1)
+
+simple
+DECLARE c CURSOR FOR TAIL t;
+FETCH 0 c;
+DECLARE d CURSOR FOR TAIL t;
+FETCH 0 d;
+----
+db error: ERROR: TAIL in transactions must be the only read statement
+
+simple
+DECLARE c CURSOR FOR TAIL t;
+FETCH 0 c;
+SELECT * FROM t LIMIT 0;
+----
+db error: ERROR: TAIL in transactions must be the only read statement
+
+simple
+SELECT * FROM t LIMIT 0;
+DECLARE c CURSOR FOR TAIL t;
+FETCH 0 c;
+----
+db error: ERROR: transaction in read-only mode
+
+# Using an AS OF in the SELECT or TAIL allows lifting that restriction.
+
+simple
+DECLARE c CURSOR FOR TAIL t AS OF 18446744073709551615;
+FETCH 0 c;
+DECLARE d CURSOR FOR TAIL t;
+FETCH 0 d;
+----
+COMPLETE 0
+COMPLETE 0
+COMPLETE 0
+COMPLETE 0
+
+simple
+DECLARE c CURSOR FOR TAIL t AS OF 18446744073709551615;
+FETCH 0 c;
+SELECT * FROM t LIMIT 0;
+----
+COMPLETE 0
+COMPLETE 0
+COMPLETE 0
+
+simple
+SELECT * FROM t LIMIT 0;
+DECLARE c CURSOR FOR TAIL t AS OF 18446744073709551615;
+FETCH 0 c;
+----
+COMPLETE 0
+COMPLETE 0
+COMPLETE 0
+
+simple
+DECLARE c CURSOR FOR TAIL t;
+FETCH 0 c;
+SELECT * FROM t LIMIT 0 AS OF AT LEAST 0;
+----
+COMPLETE 0
+COMPLETE 0
+COMPLETE 0
+
+simple
+SELECT * FROM t LIMIT 0 AS OF AT LEAST 0;
+DECLARE c CURSOR FOR TAIL t;
+FETCH 0 c;
+----
+COMPLETE 0
+COMPLETE 0
+COMPLETE 0
+
+simple
+SELECT 1;
+SELECT * FROM t;
+----
+1
+COMPLETE 1
+1
+COMPLETE 1
+
+statement ok
+CREATE SCHEMA other
+
+statement ok
+CREATE TABLE other.t (i INT)
+
+simple
+SELECT * FROM t;
+SELECT * FROM other.t;
+----
+db error: ERROR: Transactions can only reference objects in the same timedomain. See https://materialize.com/docs/sql/begin/#same-timedomain-error
+DETAIL: The following relations in the query are outside the transaction's time domain:
+"materialize.other.t"
+Only the following relations are available:
+"materialize.public.t"
+"materialize.public.t5727"
+
+# Verify that changed tables and views don't change during a transaction.
+
+statement ok
+CREATE MATERIALIZED VIEW v AS SELECT COUNT(*) FROM T
+
+simple conn=read
+BEGIN;
+SELECT * FROM t;
+SELECT * FROM v;
+----
+COMPLETE 0
+1
+COMPLETE 1
+1
+COMPLETE 1
+
+simple conn=write
+INSERT INTO t VALUES (3)
+----
+COMPLETE 1
+
+simple conn=write
+SELECT * FROM t;
+SELECT * FROM v;
+----
+1
+3
+COMPLETE 2
+2
+COMPLETE 1
+
+simple conn=read
+SELECT * FROM t;
+SELECT * FROM v;
+COMMIT;
+----
+1
+COMPLETE 1
+1
+COMPLETE 1
+COMPLETE 0
+
+# Test replacing a non-materialized view in a different transaction.
+
+statement ok
+CREATE VIEW v1 AS SELECT 1
+
+simple conn=t1
+BEGIN;
+SELECT * FROM v1;
+----
+COMPLETE 0
+1
+COMPLETE 1
+
+simple conn=t2
+CREATE OR REPLACE VIEW v1 AS SELECT 2;
+----
+COMPLETE 0
+
+simple conn=t2
+SELECT * FROM v1;
+----
+2
+COMPLETE 1
+
+# Our catalog doesn't respect SQL transactions, so we see the new v1.
+# Unmaterialized views with no dependencies exist outside of any particular
+# timedomain.
+simple conn=t1
+SELECT * FROM v1;
+COMMIT;
+----
+2
+COMPLETE 1
+COMPLETE 0
+
+simple conn=t1
+ROLLBACK;
+----
+COMPLETE 0
+
+# Verify an error is produce during write transactions if the commit fails.
+
+statement ok
+CREATE TABLE insert_fail (i int)
+
+statement ok
+INSERT INTO insert_fail VALUES (1)
+
+simple conn=t1
+BEGIN;
+INSERT into insert_fail VALUES (2);
+----
+COMPLETE 0
+COMPLETE 1
+
+simple conn=t2
+DROP table insert_fail;
+----
+COMPLETE 0
+
+simple conn=t1
+COMMIT;
+----
+db error: ERROR: unknown catalog item 'u17'
+
+# Test transaction syntax that we don't support.
+
+statement ok
+BEGIN ISOLATION LEVEL SERIALIZABLE
+
+statement error CHAIN not yet supported
+COMMIT AND CHAIN
+
+statement error CHAIN not yet supported
+ROLLBACK AND CHAIN
+
+statement ok
+ROLLBACK
+
+# This is a noop, but is supported syntax.
+statement ok
+BEGIN ISOLATION LEVEL REPEATABLE READ
+
+statement ok
+COMMIT
+
+# Access modes.
+
+statement ok
+BEGIN TRANSACTION READ WRITE
+
+statement ok
+COMMIT
+
+statement ok
+BEGIN TRANSACTION READ ONLY
+
+query I
+SELECT 1
+----
+1
+
+statement ok
+COMMIT
+
+statement ok
+BEGIN TRANSACTION READ ONLY
+
+statement error transaction in read-only mode
+INSERT INTO t (a) VALUES (1)
+
+statement ok
+ROLLBACK
+
+# Test that multi-table write transactions aren't supported
+
+statement ok
+CREATE TABLE foo(a int)
+
+statement ok
+CREATE TABLE bar(a int)
+
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO foo VALUES (42)
+
+statement error write transactions only support writes to a single table
+INSERT INTO bar VALUES (42)
+
+statement ok
+ROLLBACK

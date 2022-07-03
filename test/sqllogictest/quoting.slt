@@ -1,0 +1,98 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+mode cockroach
+
+statement ok
+CREATE TABLE t (
+    v integer
+)
+
+statement ok
+INSERT INTO t VALUES
+    (1),
+    (2)
+
+statement ok
+INSERT INTO "t" VALUES
+    (3)
+
+query I
+SELECT * FROM "t" ORDER BY v
+----
+1
+2
+3
+
+query I
+SELECT * FROM t ORDER BY "v"
+----
+1
+2
+3
+
+query T
+SELECT count(*) AS "count" FROM t
+----
+3
+
+query T
+SELECT count(*) AS count FROM "t"
+----
+3
+
+query T
+SELECT count(*) AS "count" FROM "t"
+----
+3
+
+# quoted creation
+
+statement ok
+CREATE TABLE "q" (
+    "p" integer
+)
+
+statement ok
+INSERT INTO q VALUES
+    (1),
+    (2)
+
+statement ok
+INSERT INTO "q" VALUES
+    (3)
+
+query I
+SELECT * FROM "q" ORDER BY p
+----
+1
+2
+3
+
+query I
+SELECT * FROM q ORDER BY "p"
+----
+1
+2
+3
+
+query T
+SELECT count(*) AS "count" FROM q
+----
+3
+
+query T
+SELECT count(*) AS count FROM "q"
+----
+3
+
+query T
+SELECT count(*) AS "count" FROM "q"
+----
+3

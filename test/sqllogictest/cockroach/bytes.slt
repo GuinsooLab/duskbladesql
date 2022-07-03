@@ -1,0 +1,152 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/bytes
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+mode cockroach
+
+# query T
+# SHOW bytea_output
+# ----
+# hex
+
+query T
+SELECT 'non-escaped-string'::bytea::text
+----
+\x6e6f6e2d657363617065642d737472696e67
+
+# TODO(benesch): support escape string literals.
+#
+# query T
+# SELECT e'\x5c\x78'::text
+# ----
+# \x
+#
+# query T
+# SELECT e'a\\134b\nc\'e'::text::bytea::text
+# ----
+# \x615c620a632765
+
+
+query T
+SELECT '日本語'::text::bytea::text
+----
+\xe697a5e69cace8aa9e
+
+query error invalid input syntax for type bytea: invalid escape sequence
+SELECT '\400'::bytea
+
+# TODO(benesch): support bytea_output.
+#
+# statement ok
+# SET bytea_output = escape
+#
+# query T
+# SELECT 'non-escaped-text'::bytea::text
+# ----
+# non-escaped-text
+#
+# query T
+# SELECT '\Xabcd'::bytea::text
+# ----
+# \253\315
+#
+# query T
+# SELECT b'\x5c\x78'::bytea
+# ----
+# \x
+#
+# query T
+# SELECT b'\x5c\x78'::bytea::text
+# ----
+# \\x
+#
+# query T
+# SELECT b'\x5c\x58'::bytea::text
+# ----
+# \\X
+#
+# query T
+# SELECT e'\x5c\x78'::text
+# ----
+# \x
+#
+# query T
+# SELECT '\X'::bytea::text
+# ----
+# ·
+#
+# query T
+# SELECT e'a\\134b\nc\'e'::text::bytea::text
+# ----
+# a\\b\012c'e
+#
+# query T
+# SELECT '日本語'::text::bytea::text
+# ----
+# \346\227\245\346\234\254\350\252\236
+
+subtest Regression_25841
+
+# statement ok
+# set bytea_output = hex
+
+query T
+SELECT 'a\\b'::text::bytea
+----
+a\b
+
+query I
+SELECT length('a\\b'::text::bytea)
+----
+3
+
+query error invalid input syntax for type bytea: invalid escape sequence
+SELECT 'a\bcde'::text::bytea
+
+query error invalid input syntax for type bytea: invalid escape sequence
+SELECT 'a\01'::text::bytea
+
+query error invalid input syntax for type bytea: ends with escape character
+SELECT 'a\'::text::bytea
+
+subtest Regression_27950
+
+# statement ok
+# set bytea_output = hex
+
+statement ok
+CREATE TABLE t(b bytea)
+
+statement ok
+INSERT INTO t(b) VALUES ('\xe697a5e69cace8aa9e'::bytea)
+
+query TT
+SELECT b, b::text FROM t
+----
+日本語  \xe697a5e69cace8aa9e
+
+# statement ok
+# set bytea_output = escape
+#
+# query TT
+# SELECT b, b::text FROM t
+# ----
+# 日本語  \346\227\245\346\234\254\350\252\236
+
+statement ok
+DROP TABLE t

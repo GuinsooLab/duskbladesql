@@ -1,0 +1,77 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+# Materialize chooses numeric precision at planning time rather than carrying it the value like postgres.
+# This can lead to different answers when using coalesce, case or similar which have the potential to select different precision values at runtime in postgres.
+
+mode cockroach
+
+query R
+SELECT COALESCE(1, 2.000)
+----
+1
+
+query RR
+SELECT + 3 + + COALESCE ( 33, + + AVG ( - 81 ) + + + CAST ( - 37 AS INTEGER ) ) / - 52, + 98 AS col0
+----
+2.3653846153846154 98
+
+query R
+SELECT CASE 24 WHEN - - 89 + ( + ( + - 42 ) ) * + - 50 THEN NULL ELSE + 23 * - 45 END / COALESCE ( - 87, - 93 * - 8 * + + AVG ( 10 ) / 94 * - ( 21 ), + 79 ) * 95 * + 65
+----
+73461.20689655172
+
+query R
+SELECT ALL ( - COUNT ( * ) ) + + - COUNT ( * ) + 36 / COALESCE ( + CAST ( 76 AS INTEGER ), COUNT ( * ) - - + 21 * 44 * + COALESCE ( 61, - AVG ( 41 ) / - 34 ) + COALESCE ( 67, - ( 69 ), - 75 + 35 * + ( 78 * - 20 ) ) * + 36, 99 ) * + 65
+----
+28.789473684210524
+
+query R
+SELECT ALL 44 * COALESCE ( + 6, 5 + + - 61, - COALESCE ( - + 1, + 78 * - - 4 * - AVG ( NULLIF ( + 78, - - 85 * 17 + - + 64 ) ) - - MIN ( + + 36 ) ) ) / 68 * 18 - + - 84 * + - 92 * - 41 + - + 0
+----
+316917.8823529412
+
+query R
+SELECT DISTINCT - CASE CAST ( - 91 AS INTEGER ) WHEN + COUNT ( * ) THEN NULL WHEN + 31 - + COALESCE ( + CAST ( - 3 AS INTEGER ), - + 66 ) THEN - + AVG ( DISTINCT + 72 ) ELSE - COUNT ( * ) END * 58 * + + ( COUNT ( * ) ) / - 61 * + - 33 * + 65 - - 65 AS col0
+----
+2104.5081967213114
+
+query R
+SELECT COALESCE ( - 20, - - 70 * + 37 * + CAST ( NULL AS INTEGER ) / + - AVG ( ( - - 3 ) ) + 2 ) / - MAX ( + + 83 ) * - 33 + - 79 * - 34 AS col1
+----
+2678.0481927710844
+
+query R
+SELECT ALL NULLIF ( 38, + 23 * + ( + 46 ) ) + + COUNT ( * ) - + COUNT ( DISTINCT + + 0 ) + + - 57 + + - 48 / - + COALESCE ( 85, - AVG ( + 53 ) ) * + 4 * + 44 / 22
+----
+-14.48235294117647
+
+query RI
+SELECT 17 / - COALESCE ( - + 60, - + AVG ( DISTINCT 54 ) * COUNT ( * ), + 0 ) * + MAX ( ALL - 17 ) * + - 15 - + - 14 * - + 89 - 83, ( - 61 ) / + 84 * - 65 * - 35 col1
+----
+-1256.75  0
+
+# these return null in postgres
+# https://github.com/MaterializeInc/materialize/issues/2418
+
+query error division by zero
+SELECT ALL 56 * 97 - SUM ( - 51 ) + NULLIF ( + - 36, + + CAST ( NULL AS INTEGER ) ) * + - 91 / - 0 * - 45 * - 10 * - CAST ( NULL AS INTEGER ) * - - 85
+
+query error division by zero
+SELECT ALL + CASE - 59 WHEN + 55 * - 56 + - - 95 THEN - 78 + 98 * CASE - COUNT ( * ) WHEN NULLIF ( - AVG ( DISTINCT - + NULLIF ( + - ( 11 ), 89 / ( 0 ) ) ), - COUNT ( * ) ) + 62 THEN 37 + + COUNT ( DISTINCT + 77 ) / 61 ELSE + 26 / 10 - + 14 * - 10 END / 79 END * 60 col2
+
+query error division by zero
+SELECT ALL CASE - 6 WHEN + 70 + ( 81 ) THEN NULL WHEN COALESCE ( - 22, - + COALESCE ( - 64, + 65 / 49 + - + 62, - - NULLIF ( + 57, COUNT ( ALL - CASE 58 WHEN + 17 - 80 THEN 72 * - 40 + 54 * + 58 WHEN - CAST ( NULL AS INTEGER ) THEN NULL WHEN - 59 + 45 / + COALESCE ( 54 / 88, CAST ( NULL AS INTEGER ) * - 22 + - 58 * + 98 ) THEN - 18 / 20 ELSE NULL END ) * 3 ) ) * - MAX ( DISTINCT + 46 * - 27 ), AVG ( ALL 22 ) ) THEN NULL WHEN 23 THEN 42 - + MAX ( 52 ) END
+
+# The following tests used to be invalid but are now valid
+
+query R
+SELECT 78 + - MAX ( DISTINCT - 32 ) / COALESCE ( - 25, 13 + MIN ( + 12 ) + - CAST ( NULL AS INTEGER ) * + MAX ( 8 ) * + AVG ( + + 43 ) ) * + 61 + ( + 36 ) + + ( 17 ) + - + 40 * + + 82
+----
+-3227.08

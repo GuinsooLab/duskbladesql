@@ -1,0 +1,71 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/shift
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+# not supported yet
+halt
+
+mode cockroach
+
+# Check non-constant eval
+
+statement ok
+CREATE TABLE t AS SELECT 1 AS i
+
+statement error shift argument out of range
+SELECT i << 64 FROM t
+
+statement error shift argument out of range
+SELECT i >> 64 FROM t
+
+statement error shift argument out of range
+SELECT i << -1 FROM t
+
+statement error shift argument out of range
+SELECT i >> -1 FROM t
+
+query II
+SELECT i << 63 >> 63, i << 62 >> 62 FROM t
+----
+-1 1
+
+# Check constant folding
+
+statement error shift argument out of range
+SELECT 1 << 64
+
+statement error shift argument out of range
+SELECT 1 >> 64
+
+statement error shift argument out of range
+SELECT 1 << -1
+
+statement error shift argument out of range
+SELECT 1 >> -1
+
+query II
+SELECT 1 << 63 >> 63, 1 << 62 >> 62
+----
+-1 1
+
+# Ensure that shift returns the same result as an int or a constant
+
+query II
+SELECT 1 << 63 >> 63, 1::INT << 63 >> 63
+----
+-1 -1

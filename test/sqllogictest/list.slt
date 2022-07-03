@@ -1,0 +1,2855 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+mode cockroach
+
+# The LIST type has an uncommon OID. If tokio-postres (the driver used
+# by sqllogictest) encounters an OID it doesn't recognize (LIST in
+# this case), then it queries pg_type (a wrapper around mz_types) for
+# information about it. Our LIST type currently doesn't have an entry in
+# mz_types, so that query fails and tokio-postgres is unable to execute
+# queries with LISTs. As a workaround until LIST is reflected in pg_type,
+# we just convert everything to `text`.
+
+query T
+SELECT (LIST[1,2,3])::text
+----
+{1,2,3}
+
+query error LIST types integer and integer list cannot be matched
+SELECT LIST[1,LIST[2,3]]
+
+query T
+SELECT (LIST[[1],[2,3]])::text
+----
+{{1},{2,3}}
+
+query error cannot determine type of empty list
+SELECT LIST[]
+
+query T
+SELECT (LIST[] :: INT LIST)::text
+----
+{}
+
+query T
+SELECT (LIST[null])::text
+----
+{NULL}
+
+query T
+SELECT (LIST[1, null])::text
+----
+{1,NULL}
+
+query T
+SELECT (LIST[1, null] :: INT LIST)::text
+----
+{1,NULL}
+
+query T
+SELECT (LIST[[1, null], []] :: INT LIST LIST)::text
+----
+{{1,NULL},{}}
+
+# Lists support arbitrarily deep nesting
+query T
+SELECT (LIST[[[[1], [2]]], [[[3]]]])::text
+----
+{{{{1},{2}}},{{{3}}}}
+
+# List(Int) cannot be cast to List(List(Int))
+query error LIST could not convert type integer to integer list
+SELECT LIST[1, null] :: INT LIST LIST
+
+query T
+SELECT (LIST[1, null] :: TEXT LIST)::text
+----
+{1,NULL}
+
+query T
+SELECT (LIST['foo', 'f}o', '"\', null, 'null', 'NULL'])::text
+----
+{foo,"f}o","\"\\",NULL,null,"NULL"}
+
+query T
+SELECT (list[list[list['"']]])::text
+----
+{{{"\""}}}
+
+query T
+SELECT (list['{1}'])::text
+----
+{"{1}"}
+
+query T
+SELECT (LIST[LIST[]::text list, LIST['a', 'b'], LIST['z']])::text
+----
+{{},{a,b},{z}}
+
+# 🔬 list subscripts
+
+# 🔬🔬 list indexes
+
+query R
+SELECT LIST [1, 2, 3][2]
+----
+2
+
+# exceeds maximum index
+query R
+SELECT LIST [1, 2, 3][100]
+----
+NULL
+
+# negative
+query R
+SELECT LIST [1, 2, 3][-1]
+----
+NULL
+
+# exceeds maximum layer
+query error cannot index into
+SELECT LIST [1, 2, 3][1][1]
+
+# exceeds maximum layer
+query error cannot subscript
+SELECT LIST[1,2,3][1:1][1][1:1];
+
+query error cannot subscript
+SELECT LIST[1,2,3][1][1:1][1];
+
+# 🔬🔬 list slices
+
+query T
+SELECT (LIST [1, 2, 3][2:3])::text
+----
+{2,3}
+
+query T
+SELECT (LIST [1, 2, 3][2:])::text
+----
+{2,3}
+
+query T
+SELECT (LIST [1, 2, 3][:2])::text
+----
+{1,2}
+
+query T
+SELECT (LIST [1, 2, 3][:])::text
+----
+{1,2,3}
+
+# start exceeds maximum index
+query T
+SELECT (LIST [1, 2, 3][100:])::text
+----
+{}
+
+# end exceeds maximum index
+query T
+SELECT (LIST [1, 2, 3][:100])::text
+----
+{1,2,3}
+
+# 🔬🔬 list repeated slices
+
+query T
+SELECT (LIST [1, 2, 3, 4, 5][3:5][1:2][:])::text
+----
+{3,4}
+
+# 🔬🔬 list slices + index
+
+query T
+SELECT (LIST [[1],[2],[3]][2:3])[2]::text
+----
+{3}
+
+# 🔬 list list subscripts
+
+# 🔬🔬 list list indexes
+
+query T
+SELECT (LIST [[1, 2, 3], [4, 5]][1])::text
+----
+{1,2,3}
+
+query R
+SELECT LIST [[1, 2, 3], [4, 5]][1][3]
+----
+3
+
+# exceeds maximum index
+query T
+SELECT (LIST [[1, 2, 3], [4, 5]][100])::text
+----
+NULL
+
+query T
+SELECT (LIST [[1, 2, 3], [4, 5]][1][100])::text
+----
+NULL
+
+query T
+SELECT (LIST [[1, 2, 3], [4, 5]][100][1])::text
+----
+NULL
+
+# exceeds maximum layer
+query error cannot index into
+SELECT LIST [[1, 2, 3], [4, 5]][1][1][1]
+
+# 🔬🔬 list list slices
+
+query T
+SELECT (LIST [[1, 2, 3], [4, 5]][2:2])::text
+----
+{{4,5}}
+
+query T
+SELECT (LIST [[1, 2, 3], [4, 5]][2:])::text
+----
+{{4,5}}
+
+# end exceeds maximum index
+query T
+SELECT (LIST [[1, 2, 3], [4, 5]][:100][:])::text
+----
+{{1,2,3},{4,5}}
+
+# 🔬🔬🔬 index + slice
+
+query T
+SELECT list[list[1,2], list[3,4]][2][2:2]::text;
+----
+{4}
+
+query T
+SELECT list[[1,2], list[3,4]][2][2:]::text;
+----
+{4}
+
+query T
+SELECT list[[1,2], list[3,4]][2][:2]::text;
+----
+{3,4}
+
+# 🔬🔬🔬 slice + index
+
+query T
+SELECT list[list[1,2], list[3,4]][2:2][2]::text;
+----
+NULL
+
+query T
+SELECT list[list[1,2], list[3,4]][:2][2]::text;
+----
+{3,4}
+
+query T
+SELECT list[[1,2], list[3,4]][2:][2]::text;
+----
+NULL
+
+# 🔬🔬🔬 layered list slices patterns, linear
+
+query T
+SELECT list[list[1,2], list[3,4]][1:2][2:2]::text;
+----
+{{3,4}}
+
+query T
+SELECT list[list[1,2], list[3,4]][:2][2:2]::text;
+----
+{{3,4}}
+
+query T
+SELECT list[list[1,2], list[3,4]][:2][2:]::text;
+----
+{{3,4}}
+
+query T
+SELECT list[list[1,2], list[3,4]][:][2:]::text;
+----
+{{3,4}}
+
+# 🔬🔬 list list slices + index
+
+query T
+SELECT (LIST [[1, 2, 3], [4, 5]][2:2])[1][2]::text
+----
+5
+
+# 🔬 list list list
+
+# 🔬🔬 list list list indexes
+
+query T
+SELECT (LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][1])::text
+----
+{{1,2},{3,4,5}}
+
+query T
+SELECT (LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][1][2])::text
+----
+{3,4,5}
+
+query R
+SELECT LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][1][2][3]
+----
+5
+
+# exceeds maximum index
+query T
+SELECT (LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][100])::text
+----
+NULL
+
+query T
+SELECT (LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][1][100])::text
+----
+NULL
+
+query R
+SELECT LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][1][2][100]
+----
+NULL
+
+query R
+SELECT LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][100][2][3]
+----
+NULL
+
+query R
+SELECT LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][1][100][3]
+----
+NULL
+
+# exceeds maximum layer
+query error cannot index into
+SELECT LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][1][2][3][1]
+
+# 🔬🔬 list list list slices
+
+query T
+SELECT (LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][1:2])::text
+----
+{{{1,2},{3,4,5}},{{6}}}
+
+# start exceeds maximum index
+query T
+SELECT (LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][100:100])::text
+----
+{}
+
+# end exceeds maximum index
+query T
+SELECT (LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][:100])::text
+----
+{{{1,2},{3,4,5}},{{6}},{{7,8},{9}}}
+
+# 🔬🔬🔬 layered list repeated slices
+
+query T
+SELECT (LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][2:3][:][2:2])::text
+----
+{{{7,8},{9}}}
+
+# 🔬🔬 list list list slices + index
+
+query T
+SELECT (LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][2:3])[2]::text
+----
+{{7,8},{9}}
+
+query T
+SELECT (LIST[1, 2, 3][NULL])::text
+----
+NULL
+
+query T
+SELECT (LIST[1, 2, 3][NULL:NULL])::text
+----
+NULL
+
+query T
+SELECT (LIST[1, 2, 3][1:NULL])::text
+----
+NULL
+
+query T
+SELECT (LIST[1, 2, 3][NULL:1])::text
+----
+NULL
+
+query T
+SELECT (LIST[1, 2, 3][NULL:])::text
+----
+NULL
+
+query T
+SELECT (LIST[1, 2, 3][:NULL])::text
+----
+NULL
+
+query T
+SELECT (LIST[NULL][:])::text
+----
+{NULL}
+
+query T
+SELECT (LIST[1, NULL, 3][:NULL])::text
+----
+NULL
+
+query T
+SELECT ((LIST [[1, NULL, 3], NULL, [4, NULL, 6]]::INT LIST LIST)[2:])::text
+----
+{NULL,{4,NULL,6}}
+
+# 🔬🔬 Slices and NULLs
+
+# NULL literals are not touched by slice operations
+query T
+SELECT ((LIST[NULL]::INT LIST)[1:1])::text
+----
+{NULL}
+
+# 🔬 Empty lists expressions
+
+query T
+SELECT ((LIST[]::INT LIST)[1])::text
+----
+NULL
+
+query T
+SELECT ((LIST[]::INT LIST)[:])::text
+----
+{}
+
+query T
+SELECT ((LIST[]::INT LIST)[1:1])::text
+----
+{}
+
+# 🔬 Other subscript values
+
+# 🔬🔬 end > start
+
+query T
+SELECT (LIST[1, 2, 3][2:1])::text
+----
+{}
+
+# 🔬🔬 Negative values
+
+query T
+SELECT (LIST[1, 2, 3][-100])::text
+----
+NULL
+
+query T
+SELECT (LIST[1, 2, 3][-100:])::text
+----
+{1,2,3}
+
+query T
+SELECT (LIST[1, 2, 3][-100:99])::text
+----
+{1,2,3}
+
+query T
+SELECT (LIST[1, 2, 3][-100:-99])::text
+----
+{}
+
+query T
+SELECT (LIST[1, 2, 3][-100:-101])::text
+----
+{}
+
+query T
+SELECT (LIST[1, 2, 3][:-100])::text
+----
+{}
+
+# 🔬🔬 min/max
+
+query R
+SELECT LIST[1][9223372036854775807::bigint]
+----
+NULL
+
+query R
+SELECT LIST[1][-9223372036854775807::bigint]
+----
+NULL
+
+query T
+SELECT (LIST[1][9223372036854775807::bigint:9223372036854775807::bigint])::text
+----
+{}
+
+query T
+SELECT (LIST[1][9223372036854775807::bigint:-9223372036854775807::bigint])::text
+----
+{}
+
+query T
+SELECT (LIST[1][-9223372036854775807::bigint:9223372036854775807::bigint])::text
+----
+{1}
+
+query T
+SELECT (LIST[1][-9223372036854775807::bigint:-9223372036854775807::bigint])::text
+----
+{}
+
+# 🔬 Non-int subscript values
+
+# 🔬🔬 Ok
+
+query R
+SELECT LIST[1,2,3][1.4]
+----
+1
+
+query R
+SELECT LIST[1,2,3][1.5]
+----
+2
+
+query R
+SELECT LIST[1,2,3][1.5::real]
+----
+2
+
+query R
+SELECT LIST[1,2,3][1.5::float]
+----
+2
+
+query R
+SELECT LIST[1,2,3][1.5 + 1.6]
+----
+3
+
+query T
+SELECT (LIST[1,2,3][0.1 * 2 : 0.5 + 1.6])::text
+----
+{1,2}
+
+query T
+SELECT (LIST[1,2,3][LIST[1][2.0 / 2]])::text
+----
+1
+
+# 🔬🔬 Err
+
+query error invalid input syntax for type bigint: invalid digit found in string: "dog"
+SELECT LIST[1,2,3]['dog']
+
+query error subscripting does not support casting from date to bigint
+SELECT LIST [[1, 2, 3], [4, 5]][DATE '2001-01-01']
+
+query error subscripting does not support casting from timestamp to bigint
+SELECT LIST [[1, 2, 3], [4, 5]][TIMESTAMP '2001-01-01']
+
+query error invalid input syntax for type bigint: invalid digit found in string: "dog"
+SELECT (LIST[1,2,3][1:'dog'])::text
+
+query error subscripting does not support casting from date to bigint
+SELECT LIST [[1, 2, 3], [4, 5]][1:DATE '2001-01-01']
+
+query error subscripting does not support casting from timestamp to bigint
+SELECT LIST [[1, 2, 3], [4, 5]][1:TIMESTAMP '2001-01-01']
+
+# 🔬 Built-in functions
+
+# 🔬🔬 list_append
+
+# 🔬🔬🔬 list + element
+
+query T
+SELECT (list_append(LIST[1, 2], 3))::text
+----
+{1,2,3}
+
+# 🔬🔬🔬 list list + list (list + element)
+
+query T
+SELECT (list_append(LIST[[1], [2]], LIST[3]))::text
+----
+{{1},{2},{3}}
+
+# 🔬🔬🔬🔬 polymorphism
+
+query T
+SELECT pg_typeof(list_append(LIST[1::int2], 1::int8))
+----
+bigint list
+
+query T
+SELECT pg_typeof(list_append(LIST[1::int8], 1::int2))
+----
+bigint list
+
+# 🔬🔬🔬 NULL elements
+
+# 🔬🔬🔬🔬 list + element
+
+query T
+SELECT (list_append(LIST[1], NULL))::text
+----
+{1,NULL}
+
+query T
+SELECT (list_append(NULL, 1))::text
+----
+{1}
+
+query T
+SELECT (list_append(LIST[1], NULL))::text
+----
+{1,NULL}
+
+query T
+SELECT (list_append(NULL, NULL::INT))::text
+----
+{NULL}
+
+query T
+SELECT (list_append(NULL::INT LIST, NULL))::text
+----
+{NULL}
+
+# 🔬🔬🔬🔬 list list + list (list + element)
+
+query T
+SELECT (list_append(LIST[[1]], NULL))::text
+----
+{{1},NULL}
+
+query T
+SELECT (list_append(NULL, LIST[1]))::text
+----
+{{1}}
+
+query T
+SELECT (list_append(NULL::INT LIST LIST, NULL))::text
+----
+{NULL}
+
+query T
+SELECT (list_append(NULL, NULL::INT LIST))::text
+----
+{NULL}
+
+# 🔬🔬🔬 errors
+
+query T
+SELECT list_append(NULL, NULL)::text
+----
+{NULL}
+
+query error invalid input syntax for type integer
+SELECT list_append(LIST[1], 'a')::text
+
+query error arguments cannot be implicitly cast to any implementation's parameters
+SELECT list_append(LIST[1], LIST[2])
+
+query error arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT list_append(1, LIST[1])
+
+# 🔬🔬 list_cat
+
+# 🔬🔬🔬 list + list
+
+query T
+SELECT (list_cat(LIST[1, 2], LIST[3, 4]))::text
+----
+{1,2,3,4}
+
+query T
+SELECT (list_cat(LIST[[1]], LIST[[2]]))::text
+----
+{{1},{2}}
+
+# 🔬🔬🔬 NULL elements
+
+# 🔬🔬🔬🔬 list + list
+
+query T
+SELECT (list_cat(LIST[1], NULL))::text
+----
+{1}
+
+query T
+SELECT (list_cat(LIST[1], NULL))::text
+----
+{1}
+
+query T
+SELECT (list_cat(NULL, LIST[1]))::text
+----
+{1}
+
+query T
+SELECT (list_cat(NULL::INT LIST, NULL))::text
+----
+NULL
+
+query T
+SELECT (list_cat(NULL, NULL::INT LIST))::text
+----
+NULL
+
+# 🔬🔬🔬🔬 polymorphism
+
+query T
+SELECT pg_typeof(list_cat(LIST[1::int2], LIST[1::int8]))
+----
+bigint list
+
+query T
+SELECT pg_typeof(list_cat(LIST[1::int8], LIST[1::int2]))
+----
+bigint list
+
+# 🔬🔬🔬 errors
+
+query error
+SELECT list_cat(NULL, NULL)
+
+query error
+SELECT list_cat('a', LIST[1])
+
+query error
+SELECT list_cat(LIST[1], LIST[[2]])
+
+# 🔬🔬 list_n_layers
+
+query R
+SELECT list_n_layers(LIST [1, 2, 3])
+----
+1
+
+query R
+SELECT list_n_layers(LIST []::INT LIST)
+----
+1
+
+query R
+SELECT list_n_layers(LIST[[1],[1]])
+----
+2
+
+query R
+SELECT list_n_layers(LIST [[[1], [1]], [[1]]])
+----
+3
+
+# 🔬🔬🔬 slices
+
+query R
+SELECT list_n_layers(LIST[[1],[1]][1:1])
+----
+2
+
+query R
+SELECT list_n_layers(LIST [[[1], [1]], [[1]]][1:2])
+----
+3
+
+# 🔬🔬🔬 interior lists
+
+query R
+SELECT list_n_layers(LIST[[1],[1]][1])
+----
+1
+
+query R
+SELECT list_n_layers(LIST [[[1], [1]], [[1]]][1])
+----
+2
+
+query R
+SELECT list_n_layers(LIST [[[1], [1]], [[1]]][1][1])
+----
+1
+
+# 🔬🔬🔬 NULL elements
+
+query R
+SELECT list_n_layers(LIST[NULL]::INT LIST)
+----
+1
+
+query R
+SELECT list_n_layers(LIST[NULL]::INT LIST LIST)
+----
+2
+
+query R
+SELECT list_n_layers(LIST[[1], NULL]::INT LIST LIST)
+----
+2
+
+query R
+SELECT list_n_layers((LIST[[1],NULL]::INT LIST LIST)[2])
+----
+1
+
+query error could not determine polymorphic type because input has type unknown
+SELECT list_n_layers(NULL)
+
+# 🔬🔬 list_length
+
+query R
+SELECT list_length(LIST [1])
+----
+1
+
+query R
+SELECT list_length(LIST [1, 1])
+----
+2
+
+query R
+SELECT list_length(LIST[[1],[1]])
+----
+2
+
+query R
+SELECT list_length(LIST [[[1], [1]], [[1]]])
+----
+2
+
+query R
+SELECT list_length(LIST []::INT LIST)
+----
+0
+
+# 🔬🔬🔬 slices
+
+query R
+SELECT list_length(LIST[[1],[1]][1:1])
+----
+1
+
+query R
+SELECT list_length(LIST [[[1, 2], [3, 4, 5]], [[6]], [[7, 8], [9]]][1:2])
+----
+2
+
+# 🔬🔬🔬 indexing operations
+
+query R
+SELECT list_length(LIST [[[1], [1]], [[1]]][1])
+----
+2
+
+query R
+SELECT list_length(LIST [[[1], [1]], [[1]]][1][1])
+----
+1
+
+# 🔬🔬🔬 NULL elements
+
+query R
+SELECT list_length(LIST[1, NULL]::INT LIST)
+----
+2
+
+query R
+SELECT list_length(LIST[[1],NULL]::INT LIST LIST)
+----
+2
+
+query R
+SELECT list_length((LIST[[1],NULL]::INT LIST LIST)[2])
+----
+NULL
+
+query error could not determine polymorphic type because input has type unknown
+SELECT list_length(NULL)
+
+# 🔬🔬 list_length_max
+
+query R
+SELECT list_length_max(LIST [1, 2, 3], 1)
+----
+3
+
+query R
+SELECT list_length_max(LIST [1, 2, 3, 4], 1)
+----
+4
+
+query R
+SELECT list_length_max(LIST[[1],[2,3]], 2)
+----
+2
+
+query R
+SELECT list_length_max(LIST [[[1, 2, 3], [4]], [[5]]], 2)
+----
+2
+
+query R
+SELECT list_length_max(LIST [[[1, 2, 3], [4]], [[5]]], 3)
+----
+3
+
+query R
+SELECT list_length_max(LIST []::INT LIST, 1)
+----
+0
+
+query R
+SELECT list_length_max(LIST [[]]::INT LIST LIST, 2)
+----
+0
+
+# 🔬🔬🔬 slices
+
+query R
+SELECT list_length_max(LIST[[1], [2]][1:1], 1)
+----
+1
+
+query R
+SELECT list_length_max(LIST[[1], [2, 3]][2:2], 2)
+----
+2
+
+query R
+SELECT list_length_max(LIST [[[1, 2, 3], [4]], [[5]]][1:2], 1)
+----
+2
+
+query R
+SELECT list_length_max(LIST [[[1, 2, 3], [4]], [[5]]][1:1], 2)
+----
+2
+
+query R
+SELECT list_length_max(LIST [[[1, 2, 3], [4]], [[5]]][1:1], 3)
+----
+3
+
+# 🔬🔬🔬 indexing operations
+
+query R
+SELECT list_length_max(LIST[[1], [2, 3]][2], 1)
+----
+2
+
+query R
+SELECT list_length_max(LIST [[[1, 2, 3], [4]], [[5]]][1], 1)
+----
+2
+
+query R
+SELECT list_length_max(LIST [[[1, 2, 3], [4]], [[5]]][1], 2)
+----
+3
+
+query R
+SELECT list_length_max(LIST [[[1, 2, 3], [4]], [[5]]][1][2], 1)
+----
+1
+
+# 🔬🔬🔬 NULL elements
+
+query R
+SELECT list_length_max(NULL::INT LIST, 1)
+----
+NULL
+
+query R
+SELECT list_length_max(LIST[1, NULL, 3]::INT LIST, 1)
+----
+3
+
+query R
+SELECT list_length_max(LIST[[1],NULL]::INT LIST LIST, 1)
+----
+2
+
+query R
+SELECT list_length_max((LIST[[1],NULL]::INT LIST LIST), 2)
+----
+1
+
+query T
+SELECT (list_length_max((LIST[NULL]::INT LIST LIST), 2))::text
+----
+NULL
+
+# 🔬🔬🔬 errors
+
+query error invalid layer: 2; must use value within \[1, 1\]
+SELECT list_length_max((LIST[1]::INT LIST), 2)
+
+query error invalid layer: 2; must use value within \[1, 1\]
+SELECT list_length_max((LIST[NULL]::INT LIST), 2)
+
+query error invalid layer: 3; must use value within \[1, 2\]
+SELECT list_length_max((LIST[NULL]::INT LIST LIST), 3)
+
+query error invalid layer: 0; must use value within \[1, 1\]
+SELECT list_length_max((LIST[1]::INT LIST), 0)
+
+query error invalid layer: -1; must use value within \[1, 1\]
+SELECT list_length_max((LIST[1]::INT LIST), -1)
+
+query error invalid layer: -1; must use value within \[1, 1\]
+SELECT list_length_max((LIST[1]::INT LIST), LIST[-1][1])
+
+query error could not determine polymorphic type because input has type unknown
+SELECT list_length_max(NULL, 1)
+
+# 🔬🔬 list_prepend
+
+# 🔬🔬🔬 element + list
+
+query T
+SELECT (list_prepend(1, LIST[2, 3]))::text
+----
+{1,2,3}
+
+# 🔬🔬🔬 list + list list (element + list)
+
+query T
+SELECT (list_prepend(LIST[1], LIST[[2], [3]]))::text
+----
+{{1},{2},{3}}
+
+# 🔬🔬🔬🔬 polymorphism
+
+query T
+SELECT pg_typeof(list_prepend(1::int2, LIST[1::int8]))
+----
+bigint list
+
+query T
+SELECT pg_typeof(list_prepend(1::int8, LIST[1::int2]))
+----
+bigint list
+
+# 🔬🔬🔬 NULL elements
+
+# 🔬🔬🔬🔬 element + list
+
+query T
+SELECT (list_prepend(NULL, LIST[1]))::text
+----
+{NULL,1}
+
+query T
+SELECT (list_prepend(NULL::INT, LIST[1]))::text
+----
+{NULL,1}
+
+query T
+SELECT (list_prepend(1, NULL::INT LIST))::text
+----
+{1}
+
+query T
+SELECT (list_prepend(NULL::INT, NULL::INT LIST))::text
+----
+{NULL}
+
+# 🔬🔬🔬🔬 list + list list (element + list)
+
+query T
+SELECT (list_prepend(NULL, LIST[[1]]))::text
+----
+{NULL,{1}}
+
+query T
+SELECT (list_prepend(LIST[1], NULL))::text
+----
+{{1}}
+
+query T
+SELECT (list_prepend(NULL::INT LIST, NULL))::text
+----
+{NULL}
+
+query T
+SELECT (list_prepend(NULL, NULL::INT LIST LIST))::text
+----
+{NULL}
+
+# 🔬🔬🔬 errors
+
+query error
+SELECT list_prepend(NULL, NULL)
+
+query error
+SELECT list_prepend('a', LIST[1])
+
+query error
+SELECT list_prepend(LIST[1], LIST[2])
+
+query error
+SELECT list_prepend(LIST[1], 1)
+
+# 🔬🔬 unnest
+
+query I rowsort
+SELECT unnest FROM unnest(LIST[1,2,3])
+----
+1
+2
+3
+
+query T rowsort
+SELECT unnest::text FROM unnest(LIST[[1,2],[3]])
+----
+{1,2}
+{3}
+
+query T
+SELECT unnest::text FROM unnest(LIST[NULL])
+----
+NULL
+
+query I rowsort
+SELECT unnest FROM unnest(LIST[NULL,1])
+----
+NULL
+1
+
+query T
+SELECT unnest::text FROM unnest(NULL::int list)
+----
+
+query error Cannot call function unnest\(unknown\): unable to determine which implementation to use; try providing explicit casts to match parameter types
+SELECT * FROM unnest(NULL)
+
+# 🔬 List casts
+
+# 🔬🔬 Between lists
+
+# 🔬🔬🔬 Unlayered lists
+
+query T
+SELECT (LIST['1']::int list)::text
+----
+{1}
+
+query T
+SELECT (LIST[NULL]::int list)::text
+----
+{NULL}
+
+query T
+SELECT (LIST[NULL, '1']::int list)::text
+----
+{NULL,1}
+
+query T
+SELECT (LIST[1.4, 1.5]::int list)::text
+----
+{1,2}
+
+query T
+SELECT (LIST[1.4::float, -1.5::float]::int list)::text
+----
+{1,-2}
+
+query T
+SELECT (NULL::int list)::text
+----
+NULL
+
+# 🔬🔬🔬🔬 Errors
+
+query error invalid input syntax for type integer: invalid digit found in string: "dog"
+SELECT (LIST['1', 'dog']::int list)::text
+
+query error LIST could not convert type date to integer
+SELECT LIST[DATE '2008-02-01']::int list
+
+# 🔬🔬🔬 Layered and jagged lists
+
+query T
+SELECT (LIST[[1.4::float], [-1.5::float, 2.5::float]]::int list list)::text
+----
+{{1},{-2,2}}
+
+query T
+SELECT (LIST[[1.4::float], [-1.5::float, 2.5::float], NULL::float list]::int list list)::text
+----
+{{1},{-2,2},NULL}
+
+# 🔬🔬🔬 Non-numeric types
+
+query T
+SELECT (LIST[TIMESTAMP '2008-02-01 15:04:05', TIMESTAMP '2007-02-01 15:04:05']::date list)::text
+----
+{2008-02-01,2007-02-01}
+
+query T
+SELECT (LIST[DATE '2008-02-01', DATE '2007-02-01']::timestamp list)::text
+----
+{"2008-02-01 00:00:00","2007-02-01 00:00:00"}
+
+# 🔬🔬 list to text
+
+query T
+SELECT (LIST['1']::text)::text
+----
+{1}
+
+query T
+SELECT (LIST[NULL]::text)::text
+----
+{NULL}
+
+query T
+SELECT (LIST[NULL, '1']::text)::text
+----
+{NULL,1}
+
+query T
+SELECT (LIST[NULL, 1]::text)::text
+----
+{NULL,1}
+
+query T
+SELECT (LIST[NULL, '1']::text)::text
+----
+{NULL,1}
+
+query T
+SELECT (LIST[NULL, 1]::text)::text
+----
+{NULL,1}
+
+query T
+SELECT (LIST[1.4, -1.5]::text)::text
+----
+{1.4,-1.5}
+
+query T
+SELECT (LIST[[1.4], [-1.5]]::text)::text
+----
+{{1.4},{-1.5}}
+
+query T
+SELECT (LIST[[1.4::float], [-1.5::float, 2.5::float]]::text)::text
+----
+{{1.4},{-1.5,2.5}}
+
+# Show that these are actually strings
+query I
+SELECT length(LIST['1','2']::text)
+----
+5
+
+query error Cannot call function length\(text list\): arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT length(LIST['1','2'])
+
+# 🔬🔬 text to list
+
+# 🔬🔬🔬 text to int list
+
+query I
+SELECT * FROM unnest('{1,2,3}'::int list)
+----
+1
+2
+3
+
+query T rowsort
+SELECT unnest::text FROM unnest('{{1,2},{3}}'::int list list)
+----
+{1,2}
+{3}
+
+query T rowsort
+SELECT unnest::text FROM unnest('{{{1},{2}},{{3}}}'::int list list list)
+----
+{{1},{2}}
+{{3}}
+
+query T
+SELECT ('{NULL}'::int list)::text
+----
+{NULL}
+
+query T
+SELECT ('{}'::int list)::text
+----
+{}
+
+# 🔬🔬🔬 text to text list
+
+query T
+SELECT ('{"a"," b","c ", d,e }'::text list)::text
+----
+{a," b","c ",d,e}
+
+query T
+SELECT ('{{"a"," b","c "},{ d,e }}'::text list list)::text
+----
+{{a," b","c "},{d,e}}
+
+# NULL-esque string handling
+query TI rowsort
+SELECT unnest, length(unnest) from  unnest('{NULL,nUlL,"NULL"}'::text list) ORDER BY length
+----
+NULL  4
+NULL  NULL
+NULL  NULL
+
+# Test some escape values
+query TI rowsort
+SELECT unnest, length(unnest) from  unnest('{"a,b","\\","a\\b\"c\\d\""}'::text list) ORDER BY length
+----
+\  1
+a,b  3
+a\b"c\d"  8
+
+query T
+SELECT ('{NULL}'::text list)::text
+----
+{NULL}
+
+query T
+SELECT ('{}'::text list)::text
+----
+{}
+
+# 🔬🔬🔬🔬 Quote escapes
+
+# Preserves leading and trailing spaces within escape, but not outside of escape
+query T
+SELECT ('{ " a " }'::text list)::text
+----
+{" a "}
+
+# Escapes content
+query T
+SELECT ('{"} \""}'::text list)::text
+----
+{"} \""}
+
+query T
+SELECT ('{"{a}"}'::text list)::text
+----
+{"{a}"}
+
+query T
+SELECT ('{"",""}'::text list)::text
+----
+{"",""}
+
+# This demos that the double quotes from the input are actually stripped
+query TI
+SELECT unnest, length(unnest) FROM unnest('{"",""}'::text list)
+----
+(empty) 0
+(empty) 0
+
+# Mixture of escape and non-escaped elements
+query T
+SELECT ('{"{",a}'::text list)::text
+----
+{"{",a}
+
+# Escape gets reset after each element
+query T
+SELECT ('{"{",\\}'::text list)::text
+----
+{"{","\\"}
+
+# Elements within double quotes gets unescaped before being cast
+query T
+SELECT ('{{a, "", "\""}, "{a, \"\", \"\\\"\"}"}'::text list list)::text
+----
+{{a,"","\""},{a,"","\""}}
+
+# Unquoted elements cannot have special characters interleaved within them
+query error invalid input syntax for type list: malformed literal; must escape special character '"'
+SELECT ('{a"b"}'::text list)::text
+
+query error invalid input syntax for type list: malformed literal; must escape special character '\{'
+SELECT ('{a{b}'::text list)::text
+
+query error invalid input syntax for type list: malformed array literal; contains 'b' after terminal '\}'
+SELECT ('{a}b}'::text list)::text
+
+# No non-whitespace characters after the escape
+query error invalid input syntax for type list: expected ',' or '\}', got 'b'
+SELECT ('{"a"b}'::text list)::text
+
+query error invalid input syntax for type list: expected ',' or '\}', got '"'
+SELECT ('{""""}'::text list)::text
+
+query error invalid input syntax for type list: expected ',' or '\}', got '"'
+SELECT ('{"""}'::text list)::text
+
+# 🔬🔬🔬🔬 Unquoted escapes
+
+# Escapes work on special characters
+query T
+SELECT ('{\{, \}, \", \,}'::text list)::text
+----
+{"{","}","\"",","}
+
+# Preserves escaped white space
+query T
+SELECT ('{\ a}'::text list)::text
+----
+{" a"}
+
+query T
+SELECT ('{a \ }'::text list)::text
+----
+{"a  "}
+
+query T
+SELECT ('{\ a \ }'::text list)::text
+----
+{" a  "}
+
+query T
+SELECT ('{a \ \ }'::text list)::text
+----
+{"a   "}
+
+# list lists are only escaped once; if they were escaped at each level, they
+# would no longer escape leading or trailing whitespace
+query T
+SELECT ('{{\ a}}'::text list list)::text
+----
+{{" a"}}
+
+query T
+SELECT ('{{a \ }}'::text list list)::text
+----
+{{"a  "}}
+
+query T
+SELECT ('{{\ a \ }}'::text list list)::text
+----
+{{" a  "}}
+
+query T
+SELECT ('{{a \ \ }}'::text list list)::text
+----
+{{"a   "}}
+
+# Unescaped space is trimmed
+query T
+SELECT ('{\ \ a     ,     b \  }'::text list)::text
+----
+{"  a","b  "}
+
+query T
+SELECT ('{     a \ \ , \ b     }'::text list)::text
+----
+{"a   "," b"}
+
+query T
+SELECT ('{a \ \     ,   \  b   }'::text list)::text
+----
+{"a   ","  b"}
+
+query T
+SELECT ('{ {     a \ }     }'::text list list)::text
+----
+{{"a  "}}
+
+query T
+SELECT ('{     {a \     } }'::text list list)::text
+----
+{{"a  "}}
+
+query T
+SELECT ('{     \ a}'::text list)::text
+----
+{" a"}
+
+# Leading/trailing escaped special characters are honored
+query T
+SELECT ('{\"a\"}'::text list)::text
+----
+{"\"a\""}
+
+query T
+SELECT ('{\{a\}}'::text list)::text
+----
+{"{a}"}
+
+# Escaping backslashes works
+query T
+SELECT ('{ \\\\a\\\\ }'::text list)::text
+----
+{"\\\\a\\\\"}
+
+# Escaping a non-special character has no visible effect on the output; normal
+# whitespacing rules apply
+query T
+SELECT ('{ \a }'::text list)::text
+----
+{a}
+
+# Escaping a character in NULL turns it into the string "NULL"
+query T
+SELECT ('{N\ULL}'::text list)::text
+----
+{"NULL"}
+
+# Escaping terminal character means it isn't available to close the list
+query error invalid input syntax for type list: unterminated element
+SELECT ('{\}'::text list)::text
+
+query error invalid input syntax for type list: unexpected end of input
+SELECT ('{{\}}'::text list list)::text
+
+# 🔬🔬🔬 text to other lists
+
+query T
+SELECT ('{1y 2d 3h, "4y 5d 6h"}'::interval list)::text
+----
+{"1 year 2 days 03:00:00","4 years 5 days 06:00:00"}
+
+query T
+SELECT ('{2001-02-03, "2004-05-06"}'::date list)::text
+----
+{2001-02-03,2004-05-06}
+
+query T
+SELECT ('{NULL}'::date list)::text
+----
+{NULL}
+
+# 🔬🔬🔬 misc. checks
+
+# Elements within double quotes have their double quotes before being cast to
+# their element type
+query T
+SELECT ('{"1"}'::int list)::text
+----
+{1}
+
+query T
+SELECT ('{"1"}'::text list)::text
+----
+{1}
+
+query T
+SELECT ('{"{}"}'::int list list)::text
+----
+{{}}
+
+query T
+SELECT ('{"{}"}'::text list list)::text
+----
+{{}}
+
+# Empty lists
+query T
+SELECT ('{  }'::text list)::text
+----
+{}
+
+query T
+SELECT ('{ {   } }'::text list list)::text
+----
+{{}}
+
+# 🔬🔬🔬 errors
+
+# Empty string is invalid
+query error invalid input syntax for type list: expected '\{', found empty string: ""
+SELECT (''::text list)::text
+
+# Not a list
+query error invalid input syntax for type list: expected '\{', found 1: "1"
+SELECT ('1'::int list)::text
+
+# Invalid element
+query error invalid input syntax for type list: invalid input syntax for type integer: invalid digit found in string: "a": "\{a\}"
+SELECT ('{a}'::int list)::text
+
+# 'NULL' isn't a valid string for a list; just use unescaped NULL
+query error invalid input syntax for type list: expected '\{', found N: "NULL"
+SELECT ('NULL'::int list)::text
+
+# Too many leading brackets
+query error invalid input syntax for type list: unescaped '\{' at beginning of element
+SELECT ('{{1}}'::int list)::text
+
+# Too many leading brackets
+query error invalid input syntax for type list: unescaped '\{' at beginning of element
+SELECT ('{{1}'::int list)::text
+
+query error invalid input syntax for type list: unexpected end of input: "\{\{1\}"
+SELECT ('{{1}'::int list list)::text
+
+# Too many following brackets
+query error invalid input syntax for type list: malformed array literal; contains '\}' after terminal '\}': "\{1\}\}"
+SELECT ('{1}}'::int list)::text
+
+query error invalid input syntax for type list: invalid input syntax for type list: expected '\{', found 1: "1": "\{1\}\}"
+SELECT ('{1}}'::int list list)::text
+
+# Cannot have commas followed or preceded by empty elements
+query error invalid input syntax for type list: malformed literal; missing element: "\{a,  \}"
+SELECT ('{a,  }'::text list)::text
+
+query error invalid input syntax for type list: malformed literal; missing element: "\{  ,a\}"
+SELECT ('{  ,a}'::text list)::text
+
+# 🔬🔬🔬🔬 homogeneous text lists
+query error char list not yet supported
+SELECT (LIST['ab'::char, 'cd'::varchar, 'ef'::text])::text
+
+query T
+SELECT (LIST['cd'::varchar, 'ef'::text])::text
+----
+{cd,ef}
+
+# 🔬🔬 char lists
+# ensures that the list type does not pick up an elements' typmod
+
+query error char list not yet supported
+SELECT LIST['abc'::char(1), 'abc'::char(2), 'abc'::char(3)]::text;
+
+query error char list not yet supported
+SELECT LIST['abc'::char(3), 'abc'::char(2), 'abc'::char(1)]::text;
+
+query error char list not yet supported
+SELECT pg_typeof(LIST['abc'::char(1), 'abc'::char(2), 'abc'::char(3)]);
+
+# 🔬🔬 varchar lists
+# ensures that the list type does not pick up an elements' typmod
+
+query T
+SELECT LIST['abc'::varchar(1), 'abc'::varchar(2), 'abc'::varchar(3)]::text;
+----
+{a,ab,abc}
+
+query T
+SELECT LIST['abc'::varchar(3), 'abc'::varchar(2), 'abc'::varchar(1)]::text;
+----
+{abc,ab,a}
+
+query T
+SELECT pg_typeof(LIST['abc'::varchar(1), 'abc'::varchar(2), 'abc'::varchar(3)]);
+----
+character varying list
+
+# 🔬 Built-in operations
+
+# 🔬🔬 concatenation (||)
+
+# 🔬🔬🔬 list + list
+
+query T
+SELECT (LIST[1, 2] || LIST[3, 4])::text
+----
+{1,2,3,4}
+
+query T
+SELECT (LIST[[1], [2]] || LIST[[3], [4]])::text
+----
+{{1},{2},{3},{4}}
+
+# Concatenation properly casts text to appropriate list type
+query T
+SELECT (LIST[1] || '{2}')::text
+----
+{1,2}
+
+# Differently scaled numerics are implicitly castable to one another
+query T
+SELECT ('{1.2}'::numeric(38,5) list || '{2.3}'::numeric(38,0) list)::text;
+----
+{1.2,2}
+
+# ...including on multiple layers
+query T
+SELECT ('{{1.2}}'::numeric(38,5) list list || '{{2.3}}'::numeric(38,0) list list)::text;
+----
+{{1.2},{2}}
+
+# Determining common list element type for numerics does not rescale values
+query T
+SELECT LIST[1.234::numeric(39,2), 2.345]::text;
+----
+{1.23,2.345}
+
+query T
+SELECT LIST[1.234::numeric(39,2), 2.345]::numeric(39, 2) list::text;
+----
+{1.23,2.35}
+
+# 🔬🔬🔬🔬 polymorphic
+
+query T
+SELECT pg_typeof(LIST[1::int2] || LIST[2::int8])
+----
+bigint list
+
+query T
+SELECT pg_typeof(LIST[1::int8] || LIST[2::int2])
+----
+bigint list
+
+# 🔬🔬🔬 list + element
+
+query T
+SELECT (LIST[1, 2] || 3)::text
+----
+{1,2,3}
+
+query T
+SELECT ('{1.2}'::numeric(38,5) list || '2.3'::numeric(38,0))::text;
+----
+{1.2,2}
+
+# 🔬🔬🔬🔬 polymorphic
+
+query T
+SELECT pg_typeof(LIST[1::int2] || 2::int8)
+----
+bigint list
+
+query T
+SELECT pg_typeof(LIST[1::int8] || 2::int2)
+----
+bigint list
+
+# 🔬🔬🔬 element + list
+
+query T
+SELECT (1 || LIST[2, 3])::text
+----
+{1,2,3}
+
+query T
+SELECT ('1.2'::numeric(38,5) || '{2.3}'::numeric(38,0) list)::text;
+----
+{1.2,2}
+
+# 🔬🔬🔬🔬 polymorphic
+
+query T
+SELECT pg_typeof(1::int2 || LIST[2::int8])
+----
+bigint list
+
+query T
+SELECT pg_typeof(1::int8 || LIST[2::int2])
+----
+bigint list
+
+# 🔬🔬🔬 list list + list (list + element)
+
+query T
+SELECT (LIST[[1], [2]] || LIST[3])::text
+----
+{{1},{2},{3}}
+
+query T
+SELECT ('{{1.2}}'::numeric(38,5) list list || '{2.3}'::numeric(38,0) list)::text;
+----
+{{1.2},{2}}
+
+# 🔬🔬🔬 list + list list (element + list)
+
+query T
+SELECT (LIST[1] || LIST[[2], [3]])::text
+----
+{{1},{2},{3}}
+
+query T
+SELECT ('{1.2}'::numeric(38,5) list || '{{2.3}}'::numeric(38,0) list list)::text;
+----
+{{1.2},{2}}
+
+# 🔬🔬🔬 NULL elements
+
+# 🔬🔬🔬🔬 list + list
+
+# Our type system resolves `list || NULL` as a form of `list || list`
+query T
+SELECT (LIST[1] || NULL)::text
+----
+{1}
+
+query T
+SELECT (NULL || LIST[1])::text
+----
+{1}
+
+query T
+SELECT (LIST[1] || NULL::INT LIST)::text
+----
+{1}
+
+query T
+SELECT ( NULL::INT LIST || LIST[1])::text
+----
+{1}
+
+query T
+SELECT (NULL::INT LIST || NULL::INT LIST)::text
+----
+NULL
+
+# 🔬🔬🔬🔬 list + element
+
+query T
+SELECT (LIST[1] || NULL::INT)::text
+----
+{1,NULL}
+
+query T
+SELECT (NULL::INT LIST || 1)::text
+----
+{1}
+
+query T
+SELECT (NULL::INT LIST || NULL::INT)::text
+----
+{NULL}
+
+# 🔬🔬🔬🔬 element + list
+
+query T
+SELECT (NULL::INT || LIST[1])::text
+----
+{NULL,1}
+
+query T
+SELECT (1 || NULL::INT LIST)::text
+----
+{1}
+
+query T
+SELECT (NULL::INT || NULL::INT LIST)::text
+----
+{NULL}
+
+# 🔬🔬🔬🔬 list list + list (list + element)
+
+query T
+SELECT (LIST[[1]] || NULL::INT LIST)::text
+----
+{{1},NULL}
+
+query T
+SELECT (NULL::INT LIST LIST || LIST[1])::text
+----
+{{1}}
+
+query T
+SELECT (NULL::INT LIST LIST || NULL::INT LIST)::text
+----
+{NULL}
+
+# 🔬🔬🔬🔬 list + list list (element + list)
+
+query T
+SELECT (NULL::INT LIST || LIST[[1]])::text
+----
+{NULL,{1}}
+
+query T
+SELECT (LIST[1] || NULL::INT LIST LIST)::text
+----
+{{1}}
+
+query T
+SELECT (NULL::INT LIST || NULL::INT LIST LIST)::text
+----
+{NULL}
+
+# 🔬🔬🔬 errors
+
+query error no overload for int4 list || unknown: Cannot concatenate int4 list and string list
+SELECT LIST[1] || LIST['a']
+
+query error  no overload for int4 list || unknown: Cannot concatenate int4 list and string
+SELECT LIST[1] || 'a'
+
+query error no overload for unknown || int4 list: Cannot concatenate string list and int4 list
+SELECT LIST[NULL] || LIST[1]
+
+query error no overload for unknown || int4 list: Cannot concatenate string list list and int4 list
+SELECT LIST[[NULL]] || LIST[1]
+
+query error no overload for int4 list list list || int4 list: Cannot concatenate int4 list list list and int4 list
+SELECT LIST[[[1]]] || LIST[2]
+
+# Literal text cannot be implicitly cast to list
+query error no overload for int4 list || string: arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT LIST[1] || '{2}'::text
+
+# Two lists containing implicitly castable element types are not implicitly castable to one another
+query error no overload for f32 list || f64 list: arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT '{1}'::float4 list || '{2}'::float8 list
+
+# 🔬🔬 equality (=)
+
+# 🔬🔬🔬 list = list
+
+query T
+SELECT LIST[1, 2] = LIST[1, 2]
+----
+true
+
+query T
+SELECT LIST[1, 2] = LIST[1, 3]
+----
+false
+
+query T
+SELECT LIST[[1], [2]] = LIST[[1], [2]]
+----
+true
+
+query T
+SELECT LIST[[1], [2]] = LIST[[1], [3]]
+----
+false
+
+# Equality properly casts text to appropriate list type
+query T
+SELECT LIST[1] = '{1}'
+----
+true
+
+query T
+SELECT LIST[1] = '{2}'
+----
+false
+
+# 🔬🔬🔬 errors
+
+query error no overload for integer list = text list: arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT LIST[1] = LIST['a']
+
+query error no overload for text list = integer list: arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT LIST[NULL] = LIST[1]
+
+query error no overload for text list list = integer list: arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT LIST[[NULL]] = LIST[1]
+
+query error no overload for integer list list list = integer list: arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT LIST[[[1]]] = LIST[2]
+
+# Literal text cannot be implicitly cast to list
+query error no overload for integer list = text: arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT LIST[1] = '{2}'::text
+
+# Two lists containing implicitly castable element types are not implicitly castable to one another
+query error no overload for real list = double precision list: arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT '{1}'::float4 list = '{2}'::float8 list
+
+# 🔬 CREATE TYPE .. AS LIST
+
+query error element_type must be of class type, but received pg_catalog.pg_enum which is of class view
+CREATE TYPE tbl_list AS LIST (element_type=pg_enum)
+
+query error CREATE TYPE ... AS LIST option "element_type" cannot accept type modifier on numeric, you must use the default type
+CREATE TYPE typ_mod_list AS LIST (element_type=numeric(38,0))
+
+query error CREATE TYPE ... AS LIST option "element_type" can only use named data types, but found unnamed data type int4 list. Use CREATE TYPE to create a named type first
+CREATE TYPE unnamed_element_list AS LIST (element_type=int4 list)
+
+statement ok
+CREATE TYPE int4_list_c AS LIST (element_type = int4);
+
+query T
+SELECT '{1,2}'::int4_list_c::text;
+----
+{1,2}
+
+query T
+SELECT oid >= 20000 FROM pg_type WHERE typname = 'int4_list_c';
+----
+true
+
+query T
+SELECT '{{1,2}}'::int4_list_c list::text
+----
+{{1,2}}
+
+query T
+SELECT pg_typeof(NULL::int4_list_c);
+----
+int4_list_c
+
+statement ok
+CREATE TYPE int4_list_list_c AS LIST (element_type = int4_list_c);
+
+query T
+SELECT '{{1,2}}'::int4_list_list_c::text;
+----
+{{1,2}}
+
+query error unknown catalog item bool list
+CREATE TYPE nested_list AS LIST (element_type = "bool list")
+
+query error unknown catalog item list
+CREATE TYPE nested_list AS LIST (element_type = list)
+
+# 🔬🔬 Check each valid non-array element type
+
+statement ok
+CREATE TYPE bool_list_c AS LIST (element_type=bool);
+
+query T
+SELECT '{true}'::bool_list_c::text
+----
+{t}
+
+statement ok
+CREATE TYPE int8_list_c AS LIST (element_type=int8);
+
+query T
+SELECT '{1,2}'::int8_list_c::text
+----
+{1,2}
+
+query T
+SELECT '{1,2}'::int4_list_c::text
+----
+{1,2}
+
+statement ok
+CREATE TYPE text_list_c AS LIST (element_type=text);
+
+query T
+SELECT '{a,b}'::text_list_c::text
+----
+{a,b}
+
+statement ok
+CREATE TYPE float4_list_c AS LIST (element_type=float4);
+
+query T
+SELECT '{1.2,2.3}'::float4_list_c::text
+----
+{1.2,2.3}
+
+statement ok
+CREATE TYPE float8_list_c AS LIST (element_type=float8);
+
+query T
+SELECT '{1.2,2.3}'::float8_list_c::text
+----
+{1.2,2.3}
+
+statement ok
+CREATE TYPE date_list_c AS LIST (element_type=date);
+
+query T
+SELECT '{2001-01-01}'::date_list_c::text
+----
+{2001-01-01}
+
+statement ok
+CREATE TYPE time_list_c AS LIST (element_type=time);
+
+query T
+SELECT '{12:34:56}'::time_list_c::text
+----
+{12:34:56}
+
+statement ok
+CREATE TYPE timestamp_list_c AS LIST (element_type=timestamp);
+
+query T
+SELECT '{2001-01-01 12:34:56}'::timestamp_list_c::text
+----
+{"2001-01-01 12:34:56"}
+
+statement ok
+CREATE TYPE timestamptz_list_c AS LIST (element_type=timestamptz);
+
+query T
+SELECT '{2001-01-01 12:34:56}'::timestamptz_list_c::text
+----
+{"2001-01-01 12:34:56+00"}
+
+statement ok
+CREATE TYPE interval_list_c AS LIST (element_type=interval);
+
+query T
+SELECT '{1y 2d 3h 4m}'::interval_list_c::text
+----
+{"1 year 2 days 03:04:00"}
+
+statement ok
+CREATE TYPE numeric_list_c AS LIST (element_type=numeric);
+
+query T
+SELECT '{1.23,2.34}'::numeric_list_c::text
+----
+{1.23,2.34}
+
+statement ok
+CREATE TYPE jsonb_list_c AS LIST (element_type=jsonb);
+
+query T
+SELECT '{\{\"1\":2\}}'::jsonb_list_c::text;
+----
+{"{\"1\":2}"}
+
+# 🔬🔬 Check custom type name resolution
+
+statement ok
+CREATE TYPE bool AS LIST (element_type=int4)
+
+query error invalid input syntax for type boolean: "\{1,2\}"
+SELECT '{1,2}'::bool;
+
+query T
+SELECT '{1,2}'::public.bool::text;
+----
+{1,2}
+
+# 🔬🔬 Check subtype resolution
+
+# Supports qualified subtypes
+statement ok
+CREATE TYPE qualified_int4_list AS LIST (element_type=pg_catalog.int4)
+
+statement ok
+CREATE TYPE qualified_qualified_int4_list AS LIST (element_type=public.qualified_int4_list)
+
+# Supports type aliases
+statement ok
+CREATE TYPE int_list AS MAP (key_type=pg_catalog.text, value_type=int)
+
+# 🔬🔬 Built-in operations
+
+query T
+SELECT ('{1}'::int4_list_c || 2)::text;
+----
+{1,2}
+
+query T
+SELECT (1 || '{2}'::int4_list_c)::text;
+----
+{1,2}
+
+# 🔬 Explicit casts w/ custom types
+
+query T
+SELECT ('{1.2,2.3}'::numeric_list_c)::text;
+----
+{1.2,2.3}
+
+query T
+SELECT ('{1.2,2.34567890}'::numeric_list_c::numeric(38,5) list)::text;
+----
+{1.2,2.34568}
+
+query T
+SELECT ('{1.2,2.3}'::numeric(38,5) list::numeric_list_c)::text;
+----
+{1.2,2.3}
+
+# 🔬 Implicit casts between custom types
+
+# 🔬🔬 1-D casts
+
+statement ok
+CREATE TYPE int4_list AS LIST (element_type = int4)
+
+statement ok
+CREATE TYPE int4_list_too AS LIST (element_type = int4)
+
+query T
+SELECT ('{1}'::int4_list || '{2}'::int list)::text;
+----
+{1,2}
+
+query error
+SELECT '{1}'::int4_list || '{2}'::int4_list_too;
+
+# Anonymous type cast to custom type, which is not interoperable with a
+# different custom type
+query error
+SELECT '{1}'::int4_list || '{2}'::int list || '{3}'::int4_list_too
+
+query T
+SELECT ('{1}'::int4_list_too || '{2}'::int4_list::int4_list_too)::text;
+----
+{1,2}
+
+query T
+SELECT ('{1}'::int4_list_too || '{2}'::int4_list::int list)::text;
+----
+{1,2}
+
+query T
+SELECT ('{1}'::int4_list || 2)::text;
+----
+{1,2}
+
+# 🔬🔬 2-D casts
+
+statement ok
+CREATE TYPE int4_list_list AS LIST (element_type = int4_list)
+
+statement ok
+CREATE TYPE int4_list_list_too AS LIST (element_type = int4_list_too)
+
+# Custom type interoperable with anonymous type
+query T
+SELECT ('{{1}}'::int4_list_list || '{{2}}'::int list list)::text;
+----
+{{1},{2}}
+
+# Other custom types cast to same custom type
+query T
+SELECT ('{{1}}'::int4_list_list_too || '{{2}}'::int4_list_list::int4_list_list_too)::text;
+----
+{{1},{2}}
+
+# Other custom type cast to anonymous type
+query T
+SELECT ('{{1}}'::int4_list_list_too || '{{2}}'::int4_list_list::int list list)::text;
+----
+{{1},{2}}
+
+# Different custom types
+query error
+SELECT '{{1}}'::int4_list_list || '{{2}}'::int4_list_list_too;
+
+# Different custom types as element types
+query error
+SELECT '{{1}}'::int4_list list || '{{2}}'::int4_list_list_too list;
+
+# Custom element type
+query T
+SELECT ('{{1}}'::int4_list_list || '{2}'::int4_list)::text;
+----
+{{1},{2}}
+
+# Anonymous element type
+query T
+SELECT ('{{1}}'::int4_list_list || '{2}'::int4 list)::text;
+----
+{{1},{2}}
+
+# Non-matching element type
+query error
+SELECT '{{1}}'::int4_list_list || '{2}'::int4_list_too;
+
+query error
+SELECT '{1}'::int4_list_too || '{{2}}'::int4_list_list
+
+# Element types match, but "head" type does not
+query error
+SELECT '{{1}}'::int4_list_list || '{{2}}'::int4_list list
+
+query error
+SELECT '{{1}}'::int4_list list || '{{2}}'::int4_list_list
+
+# Custom element type w/ anonymous complex type
+query T
+SELECT ('{{1}}'::int4_list list || '{{2}}'::int4_list list)::text
+----
+{{1},{2}}
+
+# Custom element exactly matches
+query T
+SELECT ('{{1}}'::int4_list list || '{2}'::int4_list)::text
+----
+{{1},{2}}
+
+# Custom element + anonymous element
+query T
+SELECT ('{{1}}'::int4_list list || '{2}'::int4 list)::text
+----
+{{1},{2}}
+
+# list_agg
+
+query T
+SELECT list_agg(a)::text FROM (SELECT 1 AS a WHERE false)
+----
+NULL
+
+query T
+SELECT list_agg(1)::text
+----
+{1}
+
+query T
+select list_agg(unnest)::text FROM (SELECT NULL) x JOIN LATERAL unnest(ARRAY[1,2,NULL]) ON true;
+----
+{NULL,1,2}
+
+statement ok
+CREATE TABLE t1 (a int)
+
+statement ok
+INSERT INTO t1 VALUES (1), (2), (3), (NULL), (NULL)
+
+query T
+SELECT list_agg(a)::text FROM (select a from t1 where a IS NOT NULL)
+----
+{1,2,3}
+
+query T
+SELECT list_agg(a)::text FROM (select a from t1 where a IS NULL)
+----
+{NULL,NULL}
+
+query T
+SELECT list_agg(a)::text FROM t1
+----
+{NULL,NULL,1,2,3}
+
+query T
+SELECT list_agg(a::text)::text FROM t1
+----
+{NULL,NULL,1,2,3}
+
+query T
+SELECT (list_agg(a) FILTER (WHERE a IS NOT NULL))::text FROM t1
+----
+{1,2,3}
+
+query T
+SELECT (list_agg(a) FILTER (WHERE a IS NULL))::text FROM t1
+----
+{NULL,NULL}
+
+query error arguments cannot be implicitly cast to any implementation's parameters
+SELECT list_agg(1, 2)
+
+statement ok
+CREATE TABLE t2 (a int, b date)
+
+statement ok
+INSERT INTO t2 VALUES (1, date '2020-01-01'), (NULL, date '2020-01-02')
+
+query T
+SELECT list_agg((a, b))::text FROM t2
+----
+{"(,2020-01-02)","(1,2020-01-01)"}
+
+query TTT
+SELECT list_agg((a, b))::text, list_agg(a)::text, list_agg(b)::text FROM t2
+----
+{"(,2020-01-02)","(1,2020-01-01)"}  {NULL,1}  {2020-01-01,2020-01-02}
+
+query T
+SELECT list_agg(ARRAY[1])::text
+----
+{{1}}
+
+query error list_agg on char
+SELECT list_agg('a'::char)::text
+
+query error list_agg on char
+SELECT list_agg('a'::char(2))::text
+
+query T
+SELECT list_agg(a)::text FROM (VALUES ('{1,2}'::int list), ('{3}'), (NULL)) v(a);
+----
+{NULL,{3},{1,2}}
+
+query T
+SELECT list_agg(a)::text FROM (VALUES (array[1,2]), (array[3]), (NULL)) v(a);
+----
+{NULL,{3},{1,2}}
+
+statement ok
+INSERT INTO t2 VALUES (3, date '2020-01-03')
+
+query T
+SELECT list_agg(a ORDER BY b)::text FROM t2
+----
+{1,NULL,3}
+
+query T
+SELECT list_agg(a ORDER BY a DESC)::text FROM t2
+----
+{NULL,3,1}
+
+query T
+SELECT list_agg(a ORDER BY a)::text FROM t2
+----
+{1,3,NULL}
+
+query T
+SELECT (list_agg(a ORDER BY a) FILTER (WHERE b IS NOT NULL))::text FROM t2
+----
+{1,3,NULL}
+
+query T
+SELECT (list_agg(a ORDER BY a) FILTER (WHERE b > '2050-01-01'))::text FROM t2
+----
+{}
+
+query T
+SELECT list_agg(a ORDER BY b)::text FROM (VALUES (1, -1), (2, -2), (3, -3)) _ (a, b)
+----
+{3,2,1}
+
+query T
+SELECT list_agg(a ORDER BY abs(b))::text FROM (VALUES (1, -1), (2, -2), (3, -3)) _ (a, b)
+----
+{1,2,3}
+
+query T
+SELECT list_agg(a ORDER BY a > 10, -a)::text FROM (VALUES (1, -1), (2, -2), (3, -3)) _ (a, b)
+----
+{3,2,1}
+
+query T
+SELECT list_agg(a ORDER BY (SELECT abs(-b)))::text FROM (VALUES (1, -1), (2, -2), (3, -3)) _ (a, b)
+----
+{1,2,3}
+
+query T
+SELECT list_agg(a ORDER BY a+1 DESC)::text FROM (VALUES (1, -1), (2, -2), (3, -3)) _ (a, b)
+----
+{3,2,1}
+
+query T
+SELECT list_agg(a ORDER BY -a DESC)::text FROM (VALUES (1, -1), (2, -2), (3, -3)) _ (a, b)
+----
+{1,2,3}
+
+query error column "no_such_column" does not exist
+SELECT array_agg(a ORDER BY no_such_column)::text FROM (VALUES (1, -1)) AS a(a);
+
+query error division by zero
+SELECT array_agg(a ORDER BY a/0)::text FROM (VALUES (1, -1)) AS a(a);
+
+query error more than one record produced in subquery
+SELECT list_agg(a ORDER BY (SELECT 'a' FROM t2))::text FROM t2;
+
+query error Expected subselect to return 1 column, got 2 columns
+SELECT list_agg(a ORDER BY (SELECT * FROM t2)) FROM t2
+
+query T
+SELECT array_agg(column1 ORDER BY 1234)::text FROM (VALUES (1)) _;
+----
+{1}
+
+# Test that a function that does not support ORDER BY is correct.
+query T
+SELECT sum(a ORDER BY b) FROM t2
+----
+4
+
+# list_remove
+
+query T
+SELECT list_remove(LIST[1,2,3,2], 2)::text
+----
+{1,3}
+
+query T
+SELECT list_remove(LIST[1,2,3,2], 5)::text
+----
+{1,2,3,2}
+
+query T
+SELECT list_remove(LIST[1,2,3,NULL::INT], NULL::INT)::text
+----
+{1,2,3}
+
+query T
+SELECT list_remove(LIST[1,NULL::INT,2,3,NULL::INT], NULL::INT)::text
+----
+{1,2,3}
+
+query T
+SELECT list_remove(NULL::integer list, NULL::INT)::text
+----
+NULL
+
+query T
+SELECT list_remove(NULL::integer list, 1)::text
+----
+NULL
+
+query T
+SELECT list_remove(LIST[1,1,1], 1)::text
+----
+{}
+
+query T
+SELECT list_remove(LIST[[1,2],[1],[1,2,3], LIST[1]], LIST[1])::text
+----
+{{1,2},{1,2,3}}
+
+query T
+SELECT list_remove(LIST[[1,2],[1],[1,2,3],LIST[1]], LIST[1,2,3])::text
+----
+{{1,2},{1},{1}}
+
+## polymorphism
+
+query T
+SELECT pg_typeof(list_remove(LIST[1::int8,2,3,2], 2::int2))
+----
+bigint list
+
+query T
+SELECT pg_typeof(list_remove(LIST[1::int2,2,3,2], 2::int8))
+----
+bigint list
+
+# array to list
+query T
+SELECT '{1,2,3}'::int[]::int list::text;
+----
+{1,2,3}
+
+query T
+SELECT pg_typeof('{1,2,3}'::int[]::int list);
+----
+integer list
+
+query T
+SELECT '{}'::int[]::int list::text;
+----
+{}
+
+query T
+SELECT pg_typeof('{1,2,3}'::int[]::int list);
+----
+integer list
+
+query T
+SELECT NULL::int[]::int list::text;
+----
+NULL
+
+query T
+SELECT pg_typeof(NULL::int[]::int list);
+----
+integer list
+
+query error invalid input syntax for type array: parsing multi-dimensional arrays is not supported
+SELECT '{{1},{2},{3}}'::int[]::int list::text;
+
+# Verify nested lists
+statement ok
+CREATE TABLE users (id int not null, other_field int not null)
+
+statement ok
+CREATE TABLE customer (id int not null, first_name string not null, last_name string not null, zip string not null)
+
+statement ok
+INSERT INTO users VALUES (1, 10), (2, 5), (3, 8);
+
+statement ok
+INSERT INTO customer VALUES (1, 'alice', 'lasta', '10003'::text), (2, 'bob', 'lastb', '10013'::text), (3, 'charlie', 'lastc', '11217'::text);
+
+query error LIST could not convert type integer list to text list
+SELECT LIST[LIST[customer.first_name, customer.last_name], LIST[customer.zip], LIST[customer.id]]::text FROM customer JOIN users ON customer.id = users.id ORDER BY users.other_field DESC LIMIT 2
+
+query T
+SELECT LIST[LIST[customer.first_name, customer.last_name], LIST[customer.zip], LIST[customer.id::text]]::text FROM customer JOIN users ON customer.id = users.id ORDER BY users.other_field DESC LIMIT 2
+----
+{{alice,lasta},{10003},{1}}
+{{charlie,lastc},{11217},{3}}
+
+## Optimization: Reducing ListIndex(ListCreate, literal) and multidimensional variations
+# Most of these tests could also be in src/expr/tests/testdata/reduce, but writing these big ListCreate expressions is a
+# bit cumbersome in that format.
+
+statement ok
+CREATE TABLE t3(f1 int, f2 int, f3 int, f4 int, f5 int, f6 int, f7 int, f8 int, n int, m int, l int list)
+
+statement ok
+CREATE MATERIALIZED VIEW m3 AS SELECT * FROM t3
+
+statement ok
+INSERT INTO t3 VALUES (1, 2, 3, 4, 5, 6, 7, 8, 1, 2, list[42, 43])
+
+statement ok
+INSERT INTO t3 VALUES (11, 12, 13, 14, 15, 16, 17, 18, 11, 12, list[82, 83])
+
+query T multiline
+EXPLAIN SELECT LIST[f1, f2, f3, f4, f5][3] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Project (#2)
+
+EOF
+
+query I rowsort
+SELECT LIST[f1, f2, f3, f4, f5][3] from m3
+----
+3
+13
+
+# Reducing multidimensional ListIndex when all indexes are literals
+
+query T multiline
+EXPLAIN SELECT LIST[[f1, f2], [f3, f4]][2][1] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Project (#2)
+
+EOF
+
+query I rowsort
+SELECT LIST[[f1, f2], [f3, f4]][2][1] from m3
+----
+3
+13
+
+query T multiline
+EXPLAIN SELECT LIST[[[f1, f2], [f3, f4]], [[f5, f6], [f7, f8]]] [2][1][2] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Project (#5)
+
+EOF
+
+query I rowsort
+SELECT LIST[[[f1, f2], [f3, f4]], [[f5, f6], [f7, f8]]] [2][1][2] from m3
+----
+6
+16
+
+# Reducing multidimensional ListIndex when some of the indexes are not literals, and therefore can't be removed
+
+query T multiline
+EXPLAIN SELECT LIST[[[f1, f2], [f7, f8, f3, f4]], [[f5, f6], [f7, f8]]] [n][m][n] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Map list_index(list_create(list_create(list_create(#0, #1), list_create(#6, #7, #2, #3)), list_create(list_create(#4, #5), list_create(#6, #7))), i32toi64(#8), i32toi64(#9), i32toi64(#8))
+| Project (#11)
+
+EOF
+
+query I rowsort
+SELECT LIST[[[f1, f2], [f7, f8, f3, f4]], [[f5, f6], [f7, f8]]] [n][m][n] from m3
+----
+7
+NULL
+
+query T multiline
+EXPLAIN SELECT LIST[[[f1, f2], [f3, f4]], [[f5, f6], [f7, f8]]] [n][m][1] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Map list_index(list_create(list_create(#0, #2), list_create(#4, #6)), i32toi64(#8), i32toi64(#9))
+| Project (#11)
+
+EOF
+
+query I rowsort
+SELECT LIST[[[f1, f2], [f3, f4]], [[f5, f6], [f7, f8]]] [n][m][1] from m3
+----
+3
+NULL
+
+query T multiline
+EXPLAIN SELECT LIST[[[f1, f2], [f3, f4]], [[f5, f6], [f7, f8]]] [n][2][m] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Map list_index(list_create(list_create(#2, #3), list_create(#6, #7)), i32toi64(#8), i32toi64(#9))
+| Project (#11)
+
+EOF
+
+query I rowsort
+SELECT LIST[[[f1, f2], [f3, f4]], [[f5, f6], [f7, f8]]] [n][2][m] from m3
+----
+4
+NULL
+
+query T multiline
+EXPLAIN SELECT LIST[[[f1, f2], [f3, f4]], [[f5, f6], [f7, f8]]] [1][n][m] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Map list_index(list_create(list_create(#0, #1), list_create(#2, #3)), i32toi64(#8), i32toi64(#9))
+| Project (#11)
+
+EOF
+
+query I rowsort
+SELECT LIST[[[f1, f2], [f3, f4]], [[f5, f6], [f7, f8]]] [1][n][m] from m3
+----
+2
+NULL
+
+query T multiline
+EXPLAIN SELECT LIST[[[f1, f2], [f3, f4]], [[f5, f6], [f7, f8]]] [2][1][n] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Map list_index(list_create(#4, #5), i32toi64(#8))
+| Project (#11)
+
+EOF
+
+query I rowsort
+SELECT LIST[[[f1, f2], [f3, f4]], [[f5, f6], [f7, f8]]] [2][1][n] from m3
+----
+5
+NULL
+
+query T multiline
+EXPLAIN SELECT LIST[[[f1, f2], [f3, f4]], [[f5, f6], [f7, f8]]] [2][n][2] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Map list_index(list_create(#5, #7), i32toi64(#8))
+| Project (#11)
+
+EOF
+
+query I rowsort
+SELECT LIST[[[f1, f2], [f3, f4]], [[f5, f6], [f7, f8]]] [2][n][2] from m3
+----
+6
+NULL
+
+query T multiline
+EXPLAIN SELECT LIST[[[f1, f2], [f3, f4]], [[f5, f6], [f7, f8]]] [n][2][2] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Map list_index(list_create(#3, #7), i32toi64(#8))
+| Project (#11)
+
+EOF
+
+query I rowsort
+SELECT LIST[[[f1, f2], [f3, f4]], [[f5, f6], [f7, f8]]] [n][2][2] from m3
+----
+4
+NULL
+
+# Reducing ListIndex when a literal index is out of bounds
+
+query T multiline
+EXPLAIN SELECT LIST[f1, f2, f3, f4, f5][6] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Map null
+| Project (#11)
+
+EOF
+
+query T multiline
+EXPLAIN SELECT LIST[f1, f2, f3, f4, f5][0] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Map null
+| Project (#11)
+
+EOF
+
+query T multiline
+EXPLAIN SELECT LIST[f1, f2, f3, f4, f5][-1] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Map null
+| Project (#11)
+
+EOF
+
+query T
+SELECT LIST[f1, f2, f3, f4, f5][6] from m3
+----
+NULL
+NULL
+
+# Reducing multidimensional ListIndex when a literal index is out of bounds.
+# Also, one of the indexes is `1+1`, which must be evaluated to make it a literal, and then the reduction can take place.
+
+query T multiline
+EXPLAIN SELECT LIST[[[f1, f2], [f3, f4]], [l, [f7, f8]]] [1+1][-1][2] from m3;
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Map null
+| Project (#11)
+
+EOF
+
+# Reducing multidimensional ListIndex when the list doesn't have enough complete layers,
+# but has a NULL instead of a ListCreate.
+
+query T multiline
+EXPLAIN SELECT LIST[[[f1, f2], [f3, f4]], [NULL, [f7, f8]]] [1+1][1][2] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Map null
+| Project (#11)
+
+EOF
+
+# Reducing multidimensional ListIndex when the list doesn't have enough complete layers,
+# but has a column reference instead of a ListCreate.
+
+query T multiline
+EXPLAIN SELECT LIST[[[f1, f2], [f3, f4]], [l, [f7, f8]]] [1+1][1][2] from m3
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Map list_index(#10, 2)
+| Project (#11)
+
+EOF
+
+query I rowsort
+SELECT LIST[[[f1, f2], [f3, f4]], [l, [f7, f8]]] [1+1][1][2] from m3
+----
+43
+83
+
+# Reducing ListIndex(ListCreate, literal) when this pattern appears after some other optimization (reduce_elision)
+# already took place.
+
+query T multiline
+EXPLAIN SELECT row_number() over () from (select f1 from m3 limit 1)
+----
+%0 =
+| Get materialize.public.m3 (u28)
+| Project (#0)
+| TopK group=() order=() limit=1 offset=0
+| Map list_create(record_create(1, record_create(#0)))
+| Project (#1)
+| FlatMap unnest_list(#0)
+| Map record_get[0](#1)
+| Project (#2)
+
+EOF

@@ -1,0 +1,150 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/apply_join
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+mode cockroach
+
+statement ok
+CREATE TABLE t (k INT PRIMARY KEY, str TEXT);
+
+statement ok
+CREATE TABLE u (l INT PRIMARY KEY, str2 TEXT);
+
+statement ok
+CREATE TABLE v (m INT PRIMARY KEY, str3 TEXT);
+
+statement ok
+INSERT INTO t SELECT i, i*10 FROM generate_series(1, 5) AS g(i);
+
+statement ok
+INSERT INTO u SELECT i, i*10 FROM generate_series(1, 5) AS g(i);
+
+statement ok
+INSERT INTO v SELECT i, i*10 FROM generate_series(1, 5) AS g(i);
+
+# Another test of subqueries within an apply join.
+
+query I
+SELECT
+	(SELECT * FROM (VALUES ((SELECT * FROM (VALUES (1)) AS s) + y)))
+FROM
+	(SELECT column1 AS y FROM (VALUES (1), (2), (3)))
+----
+2
+3
+4
+
+
+# Regression test for #36197: 0-col applyjoin RHS doesn't panic
+
+statement ok
+CREATE TABLE table9 (
+    _bool BOOL,
+    _bytes BYTEA,
+    _decimal DECIMAL,
+    _float4 FLOAT,
+    _float8 FLOAT,
+    _int8 INT,
+    _interval INTERVAL,
+    _jsonb JSONB,
+    _string TEXT,
+    _timestamp TIMESTAMP,
+    _timestamptz TIMESTAMPTZ
+);
+
+statement ok
+INSERT INTO table9 VALUES (
+  true,
+  '',
+  1,
+  1,
+  1,
+  1,
+  '1m',
+  '{}',
+  '',
+  '2020-05-26 14:23:36.157383-04',
+  '2020-05-26 14:23:36.157383-04'
+)
+
+query T
+SELECT
+  true
+FROM
+    table9 AS tab_27927
+WHERE
+    EXISTS(
+        SELECT
+            tab_27929._string AS col_85223
+        FROM
+            table9 AS tab_27928,
+            table9 AS tab_27929,
+            table9 AS tab_27930
+            RIGHT JOIN table9 AS tab_27931
+            ON
+                NOT
+                    (
+                        tab_27927._float8
+                        IN (
+                                CASE
+                                WHEN NULL::BOOL
+                                THEN
+                                    tab_27927._float4::FLOAT / tab_27927._float4::FLOAT
+                                ELSE tab_27927._float4
+                                END,
+                                tab_27927._float4,
+                                tab_27927._float8::FLOAT
+                                + NULL::FLOAT,
+                                tab_27927._float4
+                            )
+                    )
+        WHERE
+            EXISTS(
+                SELECT
+                    2470039497 AS col_85224
+                FROM
+                    table9 AS tab_27932
+                LIMIT
+                    37
+            )
+        LIMIT
+            11
+    )
+LIMIT
+    89;
+----
+true
+
+# Regression test for #37454: untyped null produced at top level.
+
+statement ok
+CREATE TABLE x (a INT)
+
+statement ok
+CREATE TABLE y (b INT)
+
+statement ok
+INSERT INTO x VALUES (1)
+
+statement ok
+INSERT INTO y VALUES (2);
+
+query II
+SELECT a, (SELECT a FROM y) FROM x
+----
+1  1

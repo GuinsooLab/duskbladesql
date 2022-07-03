@@ -1,0 +1,1419 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+mode cockroach
+
+### column names ###
+
+query TTT colnames
+SELECT length('a'), ascii('a'), substr('a', 1) LIMIT 0
+----
+length  ascii  substr
+
+query T colnames
+SELECT length(column1) FROM (VALUES ('a')) GROUP BY length(column1) LIMIT 0
+----
+length
+
+query T colnames
+SELECT column1::text FROM (VALUES ('a')) LIMIT 0
+----
+column1
+
+### ascii ###
+
+statement ok
+CREATE TABLE asciitest (strcol CHAR(15), vccol VARCHAR(15))
+
+# TODO: materialize#589 Add two tests:
+# 1: empty string to each column
+# 2: single space in each column
+statement ok
+INSERT INTO asciitest VALUES ('hello world', 'goodbye moon'), (NULL, NULL),
+    ('你好', '再见'), ('😀', '👻')
+
+statement error
+SELECT ascii(98)
+
+query II colnames
+SELECT ascii(strcol) AS strres, ascii(vccol) AS vcres FROM asciitest ORDER BY strres
+----
+strres  vcres
+104     103
+20320   20877
+128512  128123
+NULL    NULL
+
+query I
+SELECT ascii(NULL)
+----
+NULL
+
+query I
+SELECT ascii(substr('inside literal', 3, 4))
+----
+115
+
+### substr ###
+statement ok
+CREATE TABLE substrtest (strcol char(15), vccol varchar(15), smicol smallint, intcol int)
+
+statement ok
+INSERT INTO substrtest VALUES ('Mg', 'Mn', 1, 1), ('magnesium', 'manganese', 3, NULL),
+    (NULL, NULL, 0, 0), ('24.31', '54.94', 2, 3), ('长久不见', '爱不释手', NULL, 2),
+    ('', '', -1, 2)
+
+# invalid input
+statement error
+SELECT substr(192, 1, 1)
+
+statement error
+SELECT substr('from wrong type', 1.5, 2)
+
+statement error
+SELECT substr('for wrong type', 2, 1.5)
+
+query error negative substring length not allowed
+SELECT substr('for cannot be negative', 1, -3)
+
+query error negative substring length not allowed
+SELECT substr('for still cannot be negative', 30, -2)
+
+query B
+SELECT substr('hello', 2) IS NULL
+----
+false
+
+query B
+SELECT substr(NULL, 2) IS NULL
+----
+true
+
+query B
+SELECT substr('hello', NULL) IS NULL
+----
+true
+
+query B
+SELECT substr(NULL, 2, 3) IS NULL
+----
+true
+
+query B
+SELECT substr('hello', NULL, 3) IS NULL
+----
+true
+
+query B
+SELECT substr('hello', 2, NULL) IS NULL
+----
+true
+
+query error division by zero
+SELECT substr('hello', 0/0, 3)
+
+# standard tests
+
+# TODO: materialize#589 SELECT strcol FROM substrtest
+query T colnames
+SELECT substr(vccol, 1, 3) AS vcres FROM substrtest ORDER BY vcres
+----
+vcres
+(empty)
+54.
+Mn
+man
+爱不释
+NULL
+
+query T colnames
+SELECT substr(vccol, 1, 5) AS vcres FROM substrtest ORDER BY vcres
+----
+vcres
+(empty)
+54.94
+Mn
+manga
+爱不释手
+NULL
+
+query T colnames
+SELECT substr(vccol, 1) AS vcres FROM substrtest ORDER BY vcres
+----
+vcres
+(empty)
+54.94
+Mn
+manganese
+爱不释手
+NULL
+
+query T colnames
+SELECT substr(vccol, 3) AS vcres FROM substrtest ORDER BY vcres
+----
+vcres
+(empty)
+(empty)
+.94
+nganese
+释手
+NULL
+
+query T colnames
+SELECT substr(vccol, 3, 1) AS vcres FROM substrtest ORDER BY vcres
+----
+vcres
+(empty)
+(empty)
+.
+n
+释
+NULL
+
+# negative start position
+query T colnames
+SELECT substr(vccol, -1) AS vcres FROM substrtest ORDER BY vcres
+----
+vcres
+(empty)
+54.94
+Mn
+manganese
+爱不释手
+NULL
+
+query T colnames
+SELECT substr(vccol, -2, 6) AS vcres FROM substrtest ORDER BY vcres
+----
+vcres
+(empty)
+54.
+Mn
+man
+爱不释
+NULL
+
+query T colnames
+SELECT substr(vccol, -3, 5) AS vcres FROM substrtest ORDER BY vcres
+----
+vcres
+(empty)
+5
+M
+m
+爱
+NULL
+
+query TT colnames
+SELECT substr(strcol, -4, 5) AS strres, substr(vccol, -4, 5) AS vcres FROM substrtest ORDER BY vcres
+----
+strres  vcres
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+NULL    NULL
+
+query TT colnames
+SELECT substr(strcol, -6, 6) AS strres, substr(vccol, -6, 6) AS vcres FROM substrtest ORDER BY vcres
+----
+strres  vcres
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+NULL    NULL
+
+query TT colnames
+SELECT substr(strcol, -5, 4) AS strres, substr(vccol, -5, 4) AS vcres FROM substrtest ORDER BY vcres
+----
+strres  vcres
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+NULL    NULL
+
+# for or start is zero
+query T colnames
+SELECT substr(vccol, 0) AS vcres FROM substrtest ORDER BY vcres
+----
+vcres
+(empty)
+54.94
+Mn
+manganese
+爱不释手
+NULL
+
+query T colnames
+SELECT substr(vccol, 0, 3) AS vcres FROM substrtest ORDER BY vcres
+----
+vcres
+(empty)
+54
+Mn
+ma
+爱不
+NULL
+
+query TT colnames
+SELECT substr(strcol, 0, 0) AS strres, substr(vccol, 0, 0) AS vcres FROM substrtest ORDER BY vcres
+----
+strres  vcres
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+NULL    NULL
+
+query TT colnames
+SELECT substr(strcol, 3, 0) AS strres, substr(vccol, 3, 0) AS vcres FROM substrtest ORDER BY vcres
+----
+strres  vcres
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+(empty) (empty)
+NULL    NULL
+
+# NULL inputs
+query T
+SELECT substr(NULL, 1)
+----
+NULL
+
+query T
+SELECT substr(NULL, 1, 3)
+----
+NULL
+
+query T
+SELECT substr('text string', NULL)
+----
+NULL
+
+query T
+SELECT substr(NULL, NULL)
+----
+NULL
+
+query T
+SELECT substr('foo', NULL, 3)
+----
+NULL
+
+query T
+SELECT substr('bar', NULL, NULL)
+----
+NULL
+
+query T
+SELECT substr('baz', 2, NULL)
+----
+NULL
+
+query T
+SELECT substr(NULL, NULL, NULL)
+----
+NULL
+
+# alternative syntax
+query T colnames
+SELECT substring(vccol, 1, 3) AS vcres FROM substrtest ORDER BY vcres
+----
+vcres
+(empty)
+54.
+Mn
+man
+爱不释
+NULL
+
+# testing different kinds of int columns and NULL content in columns
+query T
+SELECT substr(vccol, smicol, smicol) AS vcres FROM substrtest WHERE smicol > -1  ORDER BY vcres
+----
+4.
+M
+nga
+NULL
+
+query error negative substring length not allowed
+SELECT substr(vccol, smicol, smicol) AS vcres FROM substrtest ORDER BY vcres
+
+query T
+SELECT substr(vccol, intcol, intcol) AS vcres FROM substrtest ORDER BY vcres
+----
+(empty)
+.94
+M
+不释
+NULL
+NULL
+
+query T
+SELECT substr(vccol, smicol, intcol) AS vcres FROM substrtest ORDER BY vcres
+----
+(empty)
+4.9
+M
+NULL
+NULL
+NULL
+
+query T
+SELECT substr(vccol, intcol, smicol) AS vcres FROM substrtest WHERE smicol > -1 ORDER BY vcres
+----
+.9
+M
+NULL
+NULL
+
+query T
+SELECT substr('subexpression test', ascii(''), 3)
+----
+su
+
+# testing large numbers
+query T
+SELECT substr('abcdef', 2, 2147483648);
+----
+bcdef
+
+query T
+SELECT substr('abcdef', 2147483648, 2);
+----
+(empty)
+
+query T
+SELECT substr('abcdef', 2147483648, 2147483648);
+----
+(empty)
+
+# substring alternate syntax
+query T
+SELECT substring('abcdef' from 2)
+----
+bcdef
+
+query T
+SELECT substring('abcdef', 0, 3)
+----
+ab
+
+query T
+SELECT substring('abcdef', 1, 3)
+----
+abc
+
+query T
+SELECT substring('abcdef' for 3)
+----
+abc
+
+query T
+SELECT substring('abcdef', 3, 3);
+----
+cde
+
+query T
+SELECT substring('abcdef' from 3 for 3);
+----
+cde
+
+# alternate syntax does not apply to substr
+statement error
+SELECT substr('abcdef' from 2)
+
+statement error
+SELECT substr('abcdef' for 3)
+
+statement error
+SELECT substr('abcdef' from 3 for 3)
+
+# alternate syntax edge cases
+query T
+SELECT substring('abcdef' from -1);
+----
+abcdef
+
+query T
+SELECT substring('abcdef' from 2 for 2147483648);
+----
+bcdef
+
+query T
+SELECT substring('abcdef' from 2147483648 for 2);
+----
+(empty)
+
+query T
+SELECT substring('abcdef' from 2147483648 for 2147483648);
+----
+(empty)
+
+query T
+SELECT substring('abcdef' for 2147483648);
+----
+abcdef
+
+statement error
+SELECT substring('abcdef' for -1)
+
+query T
+SELECT substring('abcdef' from -1);
+----
+abcdef
+
+query T
+SELECT substring('abcdef' from -1 for 3);
+----
+a
+
+### length ###
+statement ok
+CREATE TABLE lengthtest(strcol char(15), vccol varchar(15))
+
+statement ok
+INSERT INTO lengthtest VALUES
+    ('str', 'str'), (' str', ' str'), ('str ', 'str '), ('你好', '你好'),
+    ('今日は', '今日は'), ('हेलो', 'हेलो'),
+    (NULL, NULL), ('', '')
+
+# invalid input
+statement error
+SELECT length(99)
+
+statement error
+SELECT length('str', 99)
+
+# standard tests
+query I rowsort
+SELECT octet_length(strcol) FROM lengthtest
+----
+15
+15
+15
+15
+19
+21
+23
+NULL
+
+query I rowsort
+SELECT length(vccol) FROM lengthtest
+----
+0
+2
+3
+3
+4
+4
+4
+NULL
+
+query I
+SELECT length('你好', 'big5')
+----
+3
+
+query I
+SELECT length('你好', 'iso-8859-5')
+----
+6
+
+query I
+SELECT octet_length('你好');
+----
+6
+
+query I
+SELECT bit_length('你好');
+----
+48
+
+# encoding name conversion FROM pg to WHATWG
+query I
+SELECT length('你好', 'ISO_8859_5')
+----
+6
+
+query error invalid encoding name 'iso-123'
+SELECT length('你好', 'iso-123')
+
+# NULL inputs
+query I
+SELECT length(NULL)
+----
+NULL
+
+query I
+SELECT length('str', NULL)
+----
+NULL
+
+query T
+SELECT replace('one', 'one', 'two')
+----
+two
+
+query T
+SELECT replace('in a longer string', 'longer', 'shorter')
+----
+in a shorter string
+
+query T
+SELECT 'hello'::bytea::text
+----
+\x68656c6c6f
+
+
+### concat ###
+
+query T
+SELECT concat('CONCAT', 'function')
+----
+CONCATfunction
+
+query T
+SELECT concat('CONCAT', ' ', 'function')
+----
+CONCAT function
+
+query T
+SELECT concat('CONCAT', NULL , 'function')
+----
+CONCATfunction
+
+query I
+SELECT length(concat(''))
+----
+0
+
+query I
+SELECT length(concat(NULL))
+----
+0
+
+query I
+SELECT length(concat(' '))
+----
+1
+
+query T
+SELECT concat('CONCAT', 3 , 'function')
+----
+CONCAT3function
+
+query T
+SELECT concat('CONCAT', length('abc') , 'function')
+----
+CONCAT3function
+
+query T
+SELECT concat(3.32::float)
+----
+3.32
+
+query T
+SELECT concat(3.32::double precision)
+----
+3.32
+
+query T
+SELECT concat(3.32::int)
+----
+3
+
+query T
+SELECT concat(3.32)
+----
+3.32
+
+query T
+SELECT concat(3.32::decimal, 3)
+----
+3.323
+
+query T
+SELECT concat(3.32::float, 3)
+----
+3.323
+
+query T
+SELECT concat(3.32::float, '3')
+----
+3.323
+
+query T
+SELECT concat(true, false, 'function')
+----
+tffunction
+
+query T
+SELECT concat('你好')
+----
+你好
+
+query T
+SELECT 'CONCAT' || 'operator'
+----
+CONCAToperator
+
+query T
+SELECT 'CONCAT' || ' ' || 'operator'
+----
+CONCAT operator
+
+query T
+SELECT 'CONCAT' || NULL
+----
+NULL
+
+query T
+SELECT NULL || 'CONCAT'
+----
+NULL
+
+query I
+SELECT length('' || '')
+----
+0
+
+query I
+SELECT length(NULL || NULL)
+----
+NULL
+
+query I
+SELECT length(' ' || ' ')
+----
+2
+
+query T
+SELECT 'CONCAT' || 3 || 'operator'
+----
+CONCAT3operator
+
+query T
+SELECT 'CONCAT' || length('abc') || 'operator'
+----
+CONCAT3operator
+
+query T
+SELECT '' || true || false
+----
+truefalse
+
+query T
+SELECT '你' || '好'
+----
+你好
+
+query error no overload for boolean \|\| boolean
+SELECT true || false
+
+query T
+SELECT split_part('abc~@~def~@~ghi', '~@~', 2)
+----
+def
+
+query T
+SELECT split_part('abc~@~def~@~ghi', '', 1)
+----
+abc~@~def~@~ghi
+
+query T
+SELECT split_part('abc~@~def~@~ghi', '~@~', 4)
+----
+(empty)
+
+query T
+SELECT split_part('hello there', '', 1)
+----
+hello there
+
+query T
+SELECT split_part('', 'not', 1)
+----
+(empty)
+
+query error field position must be greater than zero
+SELECT split_part('abc~@~def~@~ghi', '~@~', 0)
+
+query error arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT split_part()
+
+query error arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT split_part('one', 'two')
+
+query error arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT split_part(1, 2, 3)
+
+### lpad ###
+query T
+SELECT lpad('str', 42, 'pad')
+----
+padpadpadpadpadpadpadpadpadpadpadpadpadstr
+
+query T
+SELECT lpad('str', 4, 'pad')
+----
+pstr
+
+query T
+SELECT lpad('str', 5, 'pad')
+----
+pastr
+
+query T
+SELECT REPLACE(lpad('str', 5), ' ', '_')
+----
+__str
+
+query T
+SELECT lpad('str', 7, 'pad')
+----
+padpstr
+
+query T
+SELECT lpad('str', 3, 'pad')
+----
+str
+
+query T
+SELECT lpad('str', 2, 'pad')
+----
+st
+
+query T
+SELECT lpad('str', 1, 'pad')
+----
+s
+
+statement error
+SELECT lpad('str', -1, 'pad')
+
+query T
+SELECT lpad('str', 0, 'pad')
+----
+(empty)
+
+query T
+SELECT lpad('str', NULL, 'pad')
+----
+NULL
+
+query T
+SELECT lpad(NULL, 10, 'pad')
+----
+NULL
+
+query T
+SELECT lpad(NULL, 10, NULL)
+----
+NULL
+
+query T
+SELECT lpad('str', 10, NULL)
+----
+NULL
+
+query T
+SELECT lpad('str', 10, '')
+----
+str
+
+query T
+SELECT lpad('', 10, '')
+----
+(empty)
+
+query T
+SELECT lpad('', 10, 'pad')
+----
+padpadpadp
+
+query T
+SELECT lpad('đẹp', 1, 'pad')
+----
+đ
+
+query T
+SELECT lpad('str', 5, 'đẹp')
+----
+đẹstr
+
+
+### ilike ###
+# ILIKE tests lifted from Cockroach
+
+query B
+SELECT 'TEST' ILIKE 'TEST'
+----
+true
+
+query B
+SELECT 'TEST' ILIKE 'test'
+----
+true
+
+query B
+SELECT 'TEST' ILIKE 'TE%'
+----
+true
+
+query B
+SELECT 'TEST' ILIKE '%E%'
+----
+true
+
+query B
+SELECT 'TEST' ILIKE '%e%'
+----
+true
+
+query B
+SELECT 'TEST' ILIKE 'TES_'
+----
+true
+
+query B
+SELECT 'TEST' ILIKE 'TE_%'
+----
+true
+
+query B
+SELECT 'TEST' ILIKE 'TE_'
+----
+false
+
+query B
+SELECT 'TEST' ILIKE '%'
+----
+true
+
+query B
+SELECT 'TEST' ILIKE '%R'
+----
+false
+
+query B
+SELECT 'TEST' ILIKE 'TESTER'
+----
+false
+
+query B
+SELECT 'TEST' ILIKE 'tester'
+----
+false
+
+query B
+SELECT 'TEST' ILIKE ''
+----
+false
+
+query B
+SELECT '' ILIKE ''
+----
+true
+
+query B
+SELECT 'T' ILIKE '_'
+----
+true
+
+query B
+SELECT 'TE' ILIKE '_'
+----
+false
+
+query B
+SELECT 'TEST' NOT ILIKE '%E%'
+----
+false
+
+query B
+SELECT 'TEST' NOT ILIKE 'TES_'
+----
+false
+
+query B
+SELECT 'TEST' NOT ILIKE 'TeS_'
+----
+false
+
+query B
+SELECT 'TEST' NOT ILIKE 'TE_'
+----
+true
+
+# Invalid type mods
+
+query error length for type character varying must be between 1 and 10485760
+SELECT ''::VARCHAR(0)
+
+query error length for type character varying must be between 1 and 10485760
+SELECT ''::VARCHAR(10485761)
+
+query error length for type character must be between 1 and 10485760
+SELECT ''::CHAR(0)
+
+query error length for type character must be between 1 and 10485760
+SELECT ''::CHAR(10485761)
+
+query error length for type character varying must be between 1 and 10485760
+SELECT ''::pg_catalog.VARCHAR(0)
+
+query error length for type character varying must be between 1 and 10485760
+SELECT ''::pg_catalog.VARCHAR(10485761)
+
+query error length for type character must be between 1 and 10485760
+SELECT ''::pg_catalog.bpchar(0)
+
+query error length for type character must be between 1 and 10485760
+SELECT ''::pg_catalog.bpchar(10485761)
+
+### position ###
+statement ok
+CREATE TABLE positiontest (strcol1 char(15), strcol2 char(15), vccol1 varchar(15), vccol2 varchar(15))
+
+statement ok
+INSERT INTO positiontest VALUES ('om', 'Thomas', 'om', 'Thomas'), ('foo', 'barbar', 'foo', 'barbar'),
+    (NULL, 'str', NULL, 'str'), ('str', NULL, 'str', NULL), ('释手', '爱不释手', '释手', '爱不释手'),
+    ('', 'str', '', 'str'), ('str', '', 'str', '')
+
+# invalid input
+statement error Expected IN, found right parenthesis
+SELECT position(42)
+
+statement error Expected IN, found right parenthesis
+SELECT position('str')
+
+statement error arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT position(42 IN 'str')
+
+statement error arguments cannot be implicitly cast to any implementation's parameters; try providing explicit casts
+SELECT position('str' IN 42)
+
+statement error Expected right parenthesis, found comma
+SELECT position('str' IN 42, 172)
+
+# standard tests
+
+#TODO: materialize#589 select position(strcol1 IN strcol2) from positiontest
+
+query I rowsort
+SELECT position(vccol1 IN vccol2) FROM positiontest
+----
+3
+0
+NULL
+NULL
+3
+1
+0
+
+# NULL inputs
+query I
+SELECT position(NULL IN 'str')
+----
+NULL
+
+query I
+SELECT position('str' IN NULL)
+----
+NULL
+
+# combining characters
+
+query I
+SELECT position('ः॑' IN 'रः॑')
+----
+2
+
+# this is exactly the same as above, but using unicode escapes
+query I
+SELECT position(e'\u0903\u0951' IN e'\u0930\u0903\u0951')
+----
+2
+
+### left ###
+statement ok
+CREATE TABLE lefttest (strcol char(15), vccol varchar(15), smicol smallint, intcol int)
+
+statement ok
+INSERT INTO lefttest VALUES ('Mg', 'Mn', 1, -1), ('magnesium', 'manganese', 3, NULL),
+    (NULL, NULL, 0, 0), ('24.31', '54.94', 3, -3), ('长久不见', '爱不释手', NULL, 3),
+    ('', '', -1, 2)
+
+# invalid input
+statement error
+SELECT left(42)
+
+statement error
+SELECT left('str')
+
+statement error
+SELECT left(42, 'str')
+
+statement error
+SELECT left('str', 42, 17)
+
+# standard tests
+
+#TODO: materialize#589 select left(strcol, foo) from lefttest
+
+# edge case
+query T rowsort
+SELECT left(vccol, 0) FROM lefttest
+----
+(empty)
+(empty)
+NULL
+(empty)
+(empty)
+(empty)
+
+# from the front
+query T rowsort
+SELECT left(vccol, 2) FROM lefttest
+----
+Mn
+ma
+NULL
+54
+爱不
+(empty)
+
+# from the back
+query T rowsort
+SELECT left(vccol, -2) FROM lefttest
+----
+(empty)
+mangane
+NULL
+54.
+爱不
+(empty)
+
+query TT rowsort
+SELECT left(vccol, smicol), left(vccol, intcol) FROM lefttest
+----
+M   M
+man NULL
+NULL    NULL
+54.    54
+NULL    爱不释
+(empty) (empty)
+
+
+# NULL inputs
+query T
+SELECT left(NULL, 99)
+----
+NULL
+
+query T
+SELECT left('str', NULL)
+----
+NULL
+
+# combining characters
+
+query T
+SELECT left('रः॑', 0)
+----
+(empty)
+
+query T
+SELECT left('रः॑', 1)
+----
+ र
+
+query T
+SELECT left('रः॑', -1)
+----
+रः
+
+# this is exactly the same as above, but using unicode escapes
+query T
+SELECT left(e'\u0930\u0903\u0951', -1)
+----
+रः
+
+# integer edge cases
+
+# i32:MIN
+query T
+SELECT left('hello', -2147483648)
+----
+(empty)
+
+# i32:MIN + 1
+query T
+SELECT left('hello', -2147483647)
+----
+(empty)
+
+# i64
+query error arguments cannot be implicitly cast to any implementation's parameters
+SELECT left('hello', 2147483648)
+
+### right ###
+statement ok
+CREATE TABLE righttest (strcol char(15), vccol varchar(15), smicol smallint, intcol int)
+
+statement ok
+INSERT INTO righttest VALUES ('Mg', 'Mn', 1, -1), ('magnesium', 'manganese', 3, NULL),
+    (NULL, NULL, 0, 0), ('24.31', '54.94', 3, -3), ('长久不见', '爱不释手', NULL, 3),
+    ('', '', -1, 2)
+
+# invalid input
+statement error
+SELECT right(42)
+
+statement error
+SELECT right('str')
+
+statement error
+SELECT right(42, 'str')
+
+statement error
+SELECT right('str', 42, 17)
+
+# standard tests
+
+#TODO: materialize#589 select right(strcol, foo) from righttest
+
+# edge case
+query T rowsort
+SELECT right(vccol, 0) FROM righttest
+----
+(empty)
+(empty)
+NULL
+(empty)
+(empty)
+(empty)
+
+# from the back
+query T rowsort
+SELECT right(vccol, 2) FROM righttest
+----
+Mn
+se
+NULL
+94
+释手
+(empty)
+
+# from the front
+query T rowsort
+SELECT right(vccol, -2) FROM righttest
+----
+(empty)
+nganese
+NULL
+.94
+释手
+(empty)
+
+query TT rowsort
+SELECT right(vccol, smicol), right(vccol, intcol) FROM righttest
+----
+n   n
+ese NULL
+NULL    NULL
+.94    94
+NULL    不释手
+(empty) (empty)
+
+
+# NULL inputs
+query T
+SELECT right(NULL, 99)
+----
+NULL
+
+query T
+SELECT right('str', NULL)
+----
+NULL
+
+# combining characters
+
+query T
+SELECT right('रः॑', 0)
+----
+(empty)
+
+query T
+SELECT right('रः॑', 1)
+----
+ ॑
+
+query T
+SELECT right('रः॑', -1)
+----
+ः॑
+
+# this is exactly the same as above, but using unicode escapes
+query T
+SELECT right(e'\u0930\u0903\u0951', -1)
+----
+ः॑
+
+# integer edge cases
+
+# i32:MIN, this seems strange, but it's what Postgres does
+query T
+SELECT right('hello', -2147483648)
+----
+hello
+
+# i32:MIN + 1
+query T
+SELECT right('hello', -2147483647)
+----
+(empty)
+
+# i64
+query error arguments cannot be implicitly cast to any implementation's parameters
+SELECT right('hello', 2147483648)
+
+query T
+SELECT repeat('hi', 5)
+----
+hihihihihi
+
+query T
+SELECT repeat('a', 0)
+----
+(empty)
+
+query T
+SELECT repeat('a', -1)
+----
+(empty)
+
+# Check for char cmp validity, which ignores white space
+# ...at datum level
+
+statement ok
+CREATE TABLE bpchar_t (a char(5));
+
+statement ok
+INSERT INTO bpchar_t VALUES ('a');
+
+query TTTTTT
+SELECT a = 'a ', a != 'a ', 'a ' < a, 'a ' <= a, a > 'a ', a >= 'a ' FROM bpchar_t;
+----
+true false false true false true
+
+# ...at row level
+statement ok
+INSERT INTO bpchar_t VALUES ('a  ');
+
+query T
+SELECT DISTINCT octet_length(a) FROM bpchar_t;
+----
+5
+
+# LIKE comparisons using char retains lhs padding, but rhs is cast to string, so
+# trimmed.
+
+query B
+SELECT 'abc'::char(3) ~~ 'abc';
+----
+true
+
+query B
+SELECT 'abc'::char(3) ~~ 'abc ';
+----
+false
+
+query B
+SELECT 'abc'::char(3) ~~ 'abc'::char(4);
+----
+true
+
+query B
+SELECT 'abc'::char(4) ~~ 'abc';
+----
+false
+
+query B
+SELECT 'abc'::char(4) ~~ 'abc ';
+----
+true
+
+query B
+SELECT 'abc'::char(4) ~~ 'abc'::char(3);
+----
+false
+
+query B
+SELECT 'abc'::char(4) ~~ 'abc'::char(4);
+----
+false
+
+query B
+SELECT 'abc'::char(3) ~~ 'abc'::char(4);
+----
+true
+
+# Regression for https://github.com/MaterializeInc/materialize/pull/7522#issuecomment-893343138
+
+query T
+SELECT 'a'::char(3) = 'a '::varchar(3);
+----
+true
+
+# Regression for https://github.com/MaterializeInc/materialize/pull/7522#issuecomment-895061714
+
+statement ok
+CREATE TABLE char_col (a char(10));
+
+statement ok
+INSERT INTO char_col VALUES ('a'), ('bc'), ('def');
+
+query T
+SELECT max(a)::text FROM char_col
+----
+def
+
+query I
+SELECT octet_length(max(a)) FROM char_col
+----
+10
+
+# Ensure calls to Any param'ed funcs pad char values
+query T
+SELECT to_jsonb('a'::char(10))
+----
+"a         "
+
+# Regression for https://github.com/MaterializeInc/materialize/pull/7522#issuecomment-895057022
+
+query T
+SELECT CONCAT('a'::char(3), 'b'::text, 'c');
+----
+a  bc
+
+query T
+SELECT CONCAT('a'::text, 'b'::char(3), 'c');
+----
+ab  c

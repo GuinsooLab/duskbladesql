@@ -1,0 +1,84 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/alias_types
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+mode cockroach
+
+# Not currently supporting these esoteric PostgreSQL-only types.
+halt
+
+statement ok
+CREATE TABLE aliases (
+    a OID,
+    b NAME,
+    FAMILY "primary" (a, rowid),
+    FAMILY fam_1_b (b)
+)
+
+query TT colnames
+SHOW CREATE TABLE aliases
+----
+table_name  create_statement
+aliases     CREATE TABLE aliases (
+            a OID NULL,
+            b NAME NULL,
+            FAMILY "primary" (a, rowid),
+            FAMILY fam_1_b (b)
+)
+
+statement ok
+INSERT INTO aliases VALUES (100, 'abc')
+
+statement ok
+INSERT INTO aliases VALUES (2, 'def')
+
+statement ok
+INSERT INTO aliases VALUES ('bool'::REGTYPE, ('ghi':::STRING)::NAME)
+
+query OT
+SELECT a, b FROM aliases ORDER BY a
+----
+2    def
+16   ghi
+100  abc
+
+query TT
+SELECT pg_typeof(a), pg_typeof(b) FROM aliases LIMIT 1
+----
+oid  name
+
+query T
+SELECT b || 'cat' FROM aliases ORDER BY a
+----
+defcat
+ghicat
+abccat
+
+query T
+SELECT reverse(b) FROM aliases ORDER BY a
+----
+fed
+ihg
+cba
+
+query I
+SELECT length(b::BYTES) FROM aliases ORDER BY a
+----
+3
+3
+3

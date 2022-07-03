@@ -1,0 +1,97 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/no_primary_key
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+mode cockroach
+
+# we don't support rowid
+# query error duplicate column name: "rowid"
+# CREATE TABLE t (
+#   rowid INT
+#)
+
+statement ok
+CREATE TABLE t (
+  a INT,
+  b INT
+)
+
+statement ok
+INSERT INTO t VALUES (1, 2)
+
+statement ok
+INSERT INTO t VALUES (1, 2)
+
+statement ok
+INSERT INTO t VALUES (3, 4)
+
+query II rowsort
+SELECT a, b FROM t
+----
+1 2
+1 2
+3 4
+
+query I
+SELECT count(rowid) FROM t
+----
+3
+
+# Make sure column order for insertion is not affected by the rowid column.
+
+statement ok
+ALTER TABLE t ADD c STRING
+
+statement ok
+INSERT INTO t VALUES (5, 6, '7')
+
+query IIT rowsort
+select * from t
+----
+1 2 NULL
+1 2 NULL
+3 4 NULL
+5 6 7
+
+statement ok
+SELECT a, b, c, rowid FROM t
+
+statement ok
+INSERT INTO t (a, rowid) VALUES (10, 11)
+
+query I
+SELECT rowid FROM t WHERE a = 10
+----
+11
+
+query TTBTTTB
+SHOW COLUMNS FROM t
+----
+a      INT8    true   NULL            ·  {}         false
+b      INT8    true   NULL            ·  {}         false
+rowid  INT8    false  unique_rowid()  ·  {primary}  true
+c      STRING  true   NULL            ·  {}         false
+
+statement ok
+CREATE INDEX a_idx ON t (a)
+
+statement ok
+INSERT INTO t DEFAULT VALUES
+
+statement error syntax error
+INSERT INTO t (a, b) DEFAULT VALUES

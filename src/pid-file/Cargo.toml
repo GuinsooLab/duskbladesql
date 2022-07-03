@@ -1,0 +1,17 @@
+[package]
+name = "mz-pid-file"
+description = "PID file management."
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.61.0"
+publish = false
+
+[dependencies]
+libc = "0.2.126"
+mz-ore = { path = "../ore", default-features = false }
+
+[dev-dependencies]
+tempfile = "3.2.0"
+
+[build-dependencies]
+cc = "1.0.73"

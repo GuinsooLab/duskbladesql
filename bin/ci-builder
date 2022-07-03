@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# ci-builder — builds and releases CI builder image.
+
+# NOTE(benesch): this script is reaching the breaking point in Bash. We should
+# rewrite it in Python before adding much more logic to it.
+
+set -euo pipefail
+
+NIGHTLY_RUST_DATE=2022-04-03
+
+cd "$(dirname "$0")/.."
+
+. misc/shlib/shlib.bash
+
+if [[ $# -lt 2 ]]
+then
+    echo "usage: $0 <command> <stable|nightly> [<args>...]
+
+Manages the ci-builder Docker image, which contains the dependencies required
+to build, test, and deploy the code in this repository.
+
+Commands:
+    run         run a command in the ci-builder image
+    build       build the ci-builder image locally
+    exists      reports via the exit code whether the ci-builder image exists
+    root-shell  open a root shell to the most recently started ci-builder container
+
+For details, consult ci/builder/README.md."
+    exit 1
+fi
+
+cmd=$1 && shift
+channel=$1 && shift
+
+rust_date=
+case "$channel" in
+    stable) rust_version=$(sed -n 's/rust-version = "\(.*\)"/\1/p' src/environmentd/Cargo.toml) ;;
+    nightly)
+        rust_version=nightly
+        rust_date=/$NIGHTLY_RUST_DATE
+        ;;
+    *)
+        printf "unknown rust channel %q\n" "$channel"
+        exit 1
+        ;;
+esac
+
+arch_gcc=${MZ_DEV_CI_BUILDER_ARCH:-$(arch_gcc)}
+arch_go=$(arch_go "$arch_gcc")
+
+cid_file=ci/builder/.${channel%%-*}.cidfile
+
+rust_components=rustc,cargo,rust-std-$arch_gcc-unknown-linux-gnu
+if [[ $rust_version = nightly ]]; then
+    rust_components+=,miri-preview
+else
+    rust_components+=,clippy-preview,rustfmt-preview
+fi
+
+uid=$(id -u)
+gid=$(id -g)
+[[ "$uid" -lt 500 ]] && uid=501
+[[ "$gid" -lt 500 ]] && gid=$uid
+
+build() {
+    docker buildx build --pull \
+        --cache-from=materialize/ci-builder:"$cache_tag" \
+        --cache-to=type=inline,mode=max \
+        --build-arg "ARCH_GCC=$arch_gcc" \
+        --build-arg "ARCH_GO=$arch_go" \
+        --build-arg "RUST_VERSION=$rust_version" \
+        --build-arg "RUST_DATE=$rust_date" \
+        --build-arg "RUST_COMPONENTS=$rust_components" \
+        --tag materialize/ci-builder:"$tag" \
+        --tag materialize/ci-builder:"$cache_tag" \
+        "$@" ci/builder
+}
+
+shasum=sha1sum
+if ! command_exists "$shasum"; then
+    shasum=shasum
+fi
+if ! command_exists "$shasum"; then
+    die "error: ci-builder: unable to find suitable SHA-1 tool; need either sha1sum or shasum"
+fi
+
+# The tag is the base32 encoded hash of the ci/builder directory. This logic is
+# similar to what mzbuild uses. Unfortunately we can't use mzbuild itself due to
+# a chicken-and-egg problem: mzbuild depends on the Python packages that are
+# *inside* this image. See materialize.git.expand_globs in the Python code for
+# details on this computation.
+files=$(cat \
+        <(git diff --name-only -z 4b825dc642cb6eb9a060e54bf8d69288fbee4904 ci/builder) \
+        <(git ls-files --others --exclude-standard -z ci/builder) \
+    | LC_ALL=C sort -z \
+    | xargs -0 sha1sum)
+files+="
+rust-version:$rust_version
+rust-date:$rust_date
+arch:$arch_gcc
+"
+tag=$(echo "$files" | python3 -c '
+import base64
+import hashlib
+import sys
+
+input = sys.stdin.buffer.read()
+hash = base64.b32encode(hashlib.sha1(input).digest())
+print(hash.decode())
+')
+cache_tag=cache-$rust_version-$arch_go
+
+
+case "$cmd" in
+    build)
+        build "$@"
+        ;;
+    exists)
+        docker manifest inspect materialize/ci-builder:"$tag" &> /dev/null
+        ;;
+    push)
+        build "$@"
+        docker push materialize/ci-builder:"$tag"
+        docker push materialize/ci-builder:"$cache_tag"
+        ;;
+    run)
+        mkdir -p target-xcompile
+        args=(
+            --cidfile "$cid_file"
+            --rm --interactive
+            --init
+            --volume "$(pwd)/target-xcompile:/mnt/build"
+            --volume "$(pwd):$(pwd)"
+            --workdir "$(pwd)"
+            --env AWS_ACCESS_KEY_ID
+            --env AWS_DEFAULT_REGION
+            --env AWS_SECRET_ACCESS_KEY
+            --env AWS_SESSION_TOKEN
+            --env CI
+            --env GITHUB_TOKEN
+            --env GPG_KEY
+            --env PYPI_TOKEN
+        )
+        for env in $(printenv | grep '^BUILDKITE' | sed 's/=.*//'); do
+            args+=(--env "$env")
+        done
+        if [[ -t 1 ]]; then
+            args+=(--tty)
+        fi
+        if [[ "$(uname -s)" = Linux ]]; then
+            # Allow Docker-in-Docker by mounting the Docker socket in the
+            # container. Host networking allows us to see ports created by
+            # containers that we launch.
+            args+=(
+                --volume "/var/run/docker.sock:/var/run/docker.sock"
+                --user "$(id -u):$(stat -c %g /var/run/docker.sock)"
+                --network host
+                --env "DOCKER_TLS_VERIFY=${DOCKER_TLS_VERIFY-}"
+                --env "DOCKER_HOST=${DOCKER_HOST-}"
+            )
+
+            # Forward Docker daemon certificates, if requested.
+            if [[ "${DOCKER_CERT_PATH:-}" ]]; then
+                args+=(
+                    --volume "$DOCKER_CERT_PATH:/docker-certs"
+                    --env "DOCKER_CERT_PATH=/docker-certs"
+                )
+            fi
+
+            # Forward Docker configuration too, if available.
+            docker_dir=${DOCKER_CONFIG:-$HOME/.docker}
+            if [[ -d "$docker_dir" ]]; then
+                args+=(
+                    --volume "$docker_dir:/docker"
+                    --env "DOCKER_CONFIG=/docker"
+                )
+            fi
+
+            # Override the Docker daemon we use to run the builder itself, if
+            # requested.
+            export DOCKER_HOST=${MZ_DEV_CI_BUILDER_DOCKER_HOST-${DOCKER_HOST-}}
+            export DOCKER_TLS_VERIFY=${MZ_DEV_CI_BUILDER_DOCKER_TLS_VERIFY-${DOCKER_TLS_VERIFY-}}
+            export DOCKER_CERT_PATH=${MZ_DEV_CI_BUILDER_DOCKER_CERT_PATH-${DOCKER_CERT_PATH-}}
+
+            # Forward the host's SSH agent, if available.
+            if [[ "${SSH_AUTH_SOCK:-}" ]]; then
+                args+=(
+                    --volume "$SSH_AUTH_SOCK:/tmp/ssh-agent.sock"
+                    --env "SSH_AUTH_SOCK=/tmp/ssh-agent.sock"
+                )
+            fi
+
+            # Forward the host's buildkite-agent binary, if available.
+            if command -v buildkite-agent > /dev/null 2>&1; then
+                args+=(--volume "$(command -v buildkite-agent)":/usr/local/bin/buildkite-agent)
+            fi
+
+            # Install a persistent volume to hold Cargo metadata. We can't
+            # forward the host's `~/.cargo` directly to the container, since
+            # that can forward binaries in `~/.cargo/bin` that override the
+            # version of Cargo installed in the container (!).
+            args+=(--volume "mz-ci-builder-cargo:/cargo")
+        else
+            args+=(--user "$(id -u):1001")
+        fi
+        if [[ "${CI_BUILDER_SCCACHE:-}" ]]; then
+            args+=(
+                --env "RUSTC_WRAPPER=sccache"
+                --env SCCACHE_BUCKET
+            )
+        fi
+        rm -f "$cid_file"
+        docker run "${args[@]}" "materialize/ci-builder:$tag" "$@"
+        ;;
+    root-shell)
+        docker exec --interactive --tty --user 0:0 "$(<"$cid_file")" ci/builder/root-shell.sh
+        ;;
+    *)
+        printf "unknown command %q\n" "$cmd"
+        exit 1
+        ;;
+esac

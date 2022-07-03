@@ -1,0 +1,758 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/tuple
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+mode cockroach
+
+statement ok
+CREATE TABLE tb(unused INT)
+
+statement ok
+INSERT INTO tb VALUES (1)
+
+subtest empty_tuple
+
+query B
+SELECT 1 IN (SELECT * FROM tb LIMIT 0)
+----
+false
+
+# NOTE(benesch): empty IN and ANY lists are a CockroachDB-ism that we are not
+# current planning to support.
+#
+# query B
+# SELECT 1 IN ()
+# ----
+# false
+#
+# query B
+# SELECT 1 = ANY ()
+# ----
+# false
+
+subtest unlabeled_tuple
+
+# TODO(bram): We don't pretty print tuples the same way as postgres. See #25522.
+query TT colnames
+SELECT (1, 2, 'hello', NULL, NULL) AS t, (true, NULL, (false, 6.6, false)) AS u FROM tb
+----
+t              u
+(1,2,hello,,)  (t,,"(f,6.6,f)")
+
+mode standard
+
+query T multiline
+SELECT (1, e'hello\nworld')
+----
+(1,"hello
+world")
+EOF
+
+mode cockroach
+
+query BBBBBBBBB colnames
+SELECT
+  (2, 2) < (1, 1) AS a,
+  (2, 2) < (1, 2) AS b,
+  (2, 2) < (1, 3) AS c,
+  (2, 2) < (2, 1) AS d,
+  (2, 2) < (2, 2) AS e,
+  (2, 2) < (2, 3) AS f,
+  (2, 2) < (3, 1) AS g,
+  (2, 2) < (3, 2) AS h,
+  (2, 2) < (3, 3) AS i
+  FROM tb
+----
+a      b      c      d      e      f     g     h     i
+false  false  false  false  false  true  true  true  true
+
+query BBBBBBBBB colnames
+SELECT
+  (2, 2) > (1, 1) AS a,
+  (2, 2) > (1, 2) AS b,
+  (2, 2) > (1, 3) AS c,
+  (2, 2) > (2, 1) AS d,
+  (2, 2) > (2, 2) AS e,
+  (2, 2) > (2, 3) AS f,
+  (2, 2) > (3, 1) AS g,
+  (2, 2) > (3, 2) AS h,
+  (2, 2) > (3, 3) AS i
+  FROM tb
+----
+a     b     c     d     e      f      g      h      i
+true  true  true  true  false  false  false  false  false
+
+query BBBBBBBBB colnames
+SELECT
+  (2, 2) <= (1, 1) AS a,
+  (2, 2) <= (1, 2) AS b,
+  (2, 2) <= (1, 3) AS c,
+  (2, 2) <= (2, 1) AS d,
+  (2, 2) <= (2, 2) AS e,
+  (2, 2) <= (2, 3) AS f,
+  (2, 2) <= (3, 1) AS g,
+  (2, 2) <= (3, 2) AS h,
+  (2, 2) <= (3, 3) AS i
+  FROM tb
+----
+a      b      c      d      e     f     g     h     i
+false  false  false  false  true  true  true  true  true
+
+query BBBBBBBBB colnames
+SELECT
+  (2, 2) >= (1, 1) AS a,
+  (2, 2) >= (1, 2) AS b,
+  (2, 2) >= (1, 3) AS c,
+  (2, 2) >= (2, 1) AS d,
+  (2, 2) >= (2, 2) AS e,
+  (2, 2) >= (2, 3) AS f,
+  (2, 2) >= (3, 1) AS g,
+  (2, 2) >= (3, 2) AS h,
+  (2, 2) >= (3, 3) AS i
+  FROM tb
+----
+a     b     c     d     e     f      g      h      i
+true  true  true  true  true  false  false  false  false
+
+query BBBBBBBBB colnames
+SELECT
+  (2, 2) = (1, 1) AS a,
+  (2, 2) = (1, 2) AS b,
+  (2, 2) = (1, 3) AS c,
+  (2, 2) = (2, 1) AS d,
+  (2, 2) = (2, 2) AS e,
+  (2, 2) = (2, 3) AS f,
+  (2, 2) = (3, 1) AS g,
+  (2, 2) = (3, 2) AS h,
+  (2, 2) = (3, 3) AS i
+  FROM tb
+----
+a      b      c      d      e     f      g      h      i
+false  false  false  false  true  false  false  false  false
+
+query BBBBBBBBB colnames
+SELECT
+  (2, 2) != (1, 1) AS a,
+  (2, 2) != (1, 2) AS b,
+  (2, 2) != (1, 3) AS c,
+  (2, 2) != (2, 1) AS d,
+  (2, 2) != (2, 2) AS e,
+  (2, 2) != (2, 3) AS f,
+  (2, 2) != (3, 1) AS g,
+  (2, 2) != (3, 2) AS h,
+  (2, 2) != (3, 3) AS i
+  FROM tb
+----
+a     b     c     d     e      f     g     h     i
+true  true  true  true  false  true  true  true  true
+
+query BBBB colnames
+SELECT
+  (1, 1) > (0, NULL) AS a,
+  (1, 1) > (1, NULL) AS b,
+  (1, 1) > (2, NULL) AS c,
+  (1, 1) > (NULL, 0) AS d
+  FROM tb
+----
+a     b     c      d
+true  NULL  false  NULL
+
+statement error invalid input syntax for type integer
+SELECT (1, 2) > (1, 'hi') FROM tb
+
+statement error unequal number of entries in row expressions
+SELECT (1, 2) > (1, 2, 3) FROM tb
+
+statement ok
+CREATE TABLE t (a int, b int, c int)
+
+statement ok
+INSERT INTO t VALUES (1, 2, 3), (2, 3, 1), (3, 1, 2)
+
+query III colnames
+SELECT * FROM t ORDER BY a, b, c
+----
+a b c
+1 2 3
+2 3 1
+3 1 2
+
+query III colnames
+SELECT * FROM t WHERE (a, b, c) > (1, 2, 3) AND (a, b, c) < (8, 9, 10) ORDER BY a, b, c
+----
+a b c
+2 3 1
+3 1 2
+
+# NOTE(benesch): Cockroach mishandles this. This test has been adapted to match
+# PostgreSQL.
+query III colnames,rowsort
+SELECT (t.*) AS a FROM t
+----
+a b c
+2 3 1
+3 1 2
+1 2 3
+
+query BB colnames
+SELECT ((1, 2), 'equal') = ((1, 2.0), 'equal') AS a,
+       ((1, 2), 'equal') = ((1, 2.0), 'not equal') AS b
+	   FROM tb
+----
+a     b
+true  false
+
+query B colnames
+SELECT ((1, 2), 'equal') = ((1, 2.1), 'equal') AS a
+  FROM tb
+----
+a
+false
+
+query B colnames
+SELECT (ROW(1 + 9), 'a' || 'b') = (ROW(sqrt(100.0)), 'ab') AS a
+  FROM tb
+----
+a
+true
+
+query B colnames
+SELECT (ROW(sqrt(100.0)), 'ab') = (ROW(1 + 9), 'a' || 'b') AS a
+  FROM tb
+----
+a
+true
+
+query error invalid input syntax for type integer
+SELECT ((1, 2), 'equal') = ((1, 'huh'), 'equal') FROM tb
+
+# Issue #3568
+
+statement ok
+CREATE TABLE kv (
+  k INT PRIMARY KEY,
+  v INT
+)
+
+statement ok
+INSERT INTO kv VALUES (1, 2)
+
+query II colnames
+SELECT k, v FROM kv WHERE (k, v) = (1, 100)
+----
+k  v
+
+query II colnames
+SELECT k, v FROM kv WHERE (k, v) IN ((1, 100))
+----
+k  v
+
+statement ok
+DROP TABLE kv
+
+# Issue #12295
+
+query B colnames
+SELECT 'foo' IN (x, 'aaa') AS r FROM (SELECT 'foo' AS x FROM tb)
+----
+r
+true
+
+query B colnames
+SELECT 'foo' IN (x, 'zzz') AS r FROM (SELECT 'foo' AS x FROM tb)
+----
+r
+true
+
+# Subquery tuples are already sorted
+
+query B colnames
+SELECT 3 IN (SELECT c FROM t ORDER BY 1 ASC) AS r
+----
+r
+true
+
+query B colnames
+SELECT 4 IN (SELECT c FROM t ORDER BY 1 DESC) AS r
+----
+r
+false
+
+query B colnames
+SELECT (1, 2) IN (SELECT a, b FROM t ORDER BY 1 ASC, 2 ASC) AS r
+----
+r
+true
+
+query B colnames
+SELECT (1, 2) IN (SELECT a, b FROM t ORDER BY 1 DESC, 2 DESC) AS r
+----
+r
+true
+
+statement ok
+DROP TABLE t
+
+# Issue #12302
+
+query B colnames
+SELECT 1 IN (2, NULL) AS r
+  FROM tb
+----
+r
+NULL
+
+query B colnames
+SELECT 1 IN (2, x) AS r FROM (SELECT NULL::int AS x FROM tb)
+----
+r
+NULL
+
+# Issue 10407: tuple comparisons should not require homogeneous types
+query B colnames
+SELECT (now(), 2) = (now() :: timestamp, 2) AS r
+  FROM tb
+----
+r
+true
+
+query B colnames
+SELECT (1, 2) > (1.0, 2.0) AS r
+  FROM tb
+----
+r
+false
+
+statement ok
+CREATE TABLE uvw (
+  u INT,
+  v INT,
+  w INT
+)
+
+statement ok
+CREATE INDEX uvw_idx ON uvw (u, v, w)
+
+statement ok
+INSERT INTO uvw SELECT u, v, w FROM
+  generate_series(0, 3) AS u,
+  generate_series(0, 3) AS v,
+  generate_series(0, 3) AS w
+
+statement ok
+UPDATE uvw SET u = NULL WHERE u = 0
+
+statement ok
+UPDATE uvw SET v = NULL WHERE v = 0
+
+statement ok
+UPDATE uvw SET w = NULL WHERE w = 0
+
+# Note: Result differs from Cockroach but matches Postgres.
+query III colnames
+SELECT * FROM uvw ORDER BY u, v, w
+----
+u     v     w
+1     1     1
+1     1     2
+1     1     3
+1     1     NULL
+1     2     1
+1     2     2
+1     2     3
+1     2     NULL
+1     3     1
+1     3     2
+1     3     3
+1     3     NULL
+1     NULL  1
+1     NULL  2
+1     NULL  3
+1     NULL  NULL
+2     1     1
+2     1     2
+2     1     3
+2     1     NULL
+2     2     1
+2     2     2
+2     2     3
+2     2     NULL
+2     3     1
+2     3     2
+2     3     3
+2     3     NULL
+2     NULL  1
+2     NULL  2
+2     NULL  3
+2     NULL  NULL
+3     1     1
+3     1     2
+3     1     3
+3     1     NULL
+3     2     1
+3     2     2
+3     2     3
+3     2     NULL
+3     3     1
+3     3     2
+3     3     3
+3     3     NULL
+3     NULL  1
+3     NULL  2
+3     NULL  3
+3     NULL  NULL
+NULL  1     1
+NULL  1     2
+NULL  1     3
+NULL  1     NULL
+NULL  2     1
+NULL  2     2
+NULL  2     3
+NULL  2     NULL
+NULL  3     1
+NULL  3     2
+NULL  3     3
+NULL  3     NULL
+NULL  NULL  1
+NULL  NULL  2
+NULL  NULL  3
+NULL  NULL  NULL
+
+# Note: Result differs from Cockroach but matches Postgres.
+query III colnames
+SELECT * FROM uvw WHERE (u, v, w) >= (1, 2, 3) ORDER BY u, v, w
+----
+u  v     w
+1  2     3
+1  3     1
+1  3     2
+1  3     3
+1  3     NULL
+2  1     1
+2  1     2
+2  1     3
+2  1     NULL
+2  2     1
+2  2     2
+2  2     3
+2  2     NULL
+2  3     1
+2  3     2
+2  3     3
+2  3     NULL
+2  NULL  1
+2  NULL  2
+2  NULL  3
+2  NULL  NULL
+3  1     1
+3  1     2
+3  1     3
+3  1     NULL
+3  2     1
+3  2     2
+3  2     3
+3  2     NULL
+3  3     1
+3  3     2
+3  3     3
+3  3     NULL
+3  NULL  1
+3  NULL  2
+3  NULL  3
+3  NULL  NULL
+
+# Note: Result differs from Cockroach but matches Postgres.
+query III colnames
+SELECT * FROM uvw WHERE (u, v, w) > (2, 1, 1) ORDER BY u, v, w
+----
+u  v     w
+2  1     2
+2  1     3
+2  2     1
+2  2     2
+2  2     3
+2  2     NULL
+2  3     1
+2  3     2
+2  3     3
+2  3     NULL
+3  1     1
+3  1     2
+3  1     3
+3  1     NULL
+3  2     1
+3  2     2
+3  2     3
+3  2     NULL
+3  3     1
+3  3     2
+3  3     3
+3  3     NULL
+3  NULL  1
+3  NULL  2
+3  NULL  3
+3  NULL  NULL
+
+# Note: Result differs from Cockroach but matches Postgres.
+query III colnames
+SELECT * FROM uvw WHERE (u, v, w) <= (2, 3, 1) ORDER BY u, v, w
+----
+u  v     w
+1  1     1
+1  1     2
+1  1     3
+1  1     NULL
+1  2     1
+1  2     2
+1  2     3
+1  2     NULL
+1  3     1
+1  3     2
+1  3     3
+1  3     NULL
+1  NULL  1
+1  NULL  2
+1  NULL  3
+1  NULL  NULL
+2  1     1
+2  1     2
+2  1     3
+2  1     NULL
+2  2     1
+2  2     2
+2  2     3
+2  2     NULL
+2  3     1
+
+# Note: Result differs from Cockroach but matches Postgres.
+query III colnames
+SELECT * FROM uvw WHERE (u, v, w) < (2, 2, 2) ORDER BY u, v, w
+----
+u  v     w
+1  1     1
+1  1     2
+1  1     3
+1  1     NULL
+1  2     1
+1  2     2
+1  2     3
+1  2     NULL
+1  3     1
+1  3     2
+1  3     3
+1  3     NULL
+1  NULL  1
+1  NULL  2
+1  NULL  3
+1  NULL  NULL
+2  1     1
+2  1     2
+2  1     3
+2  1     NULL
+2  2     1
+
+# Note: Result differs from Cockroach but matches Postgres.
+query III colnames
+SELECT * FROM uvw WHERE (u, v, w) != (1, 2, 3) ORDER BY u, v, w
+----
+u     v     w
+1     1     1
+1     1     2
+1     1     3
+1     1     NULL
+1     2     1
+1     2     2
+1     3     1
+1     3     2
+1     3     3
+1     3     NULL
+1     NULL  1
+1     NULL  2
+2     1     1
+2     1     2
+2     1     3
+2     1     NULL
+2     2     1
+2     2     2
+2     2     3
+2     2     NULL
+2     3     1
+2     3     2
+2     3     3
+2     3     NULL
+2     NULL  1
+2     NULL  2
+2     NULL  3
+2     NULL  NULL
+3     1     1
+3     1     2
+3     1     3
+3     1     NULL
+3     2     1
+3     2     2
+3     2     3
+3     2     NULL
+3     3     1
+3     3     2
+3     3     3
+3     3     NULL
+3     NULL  1
+3     NULL  2
+3     NULL  3
+3     NULL  NULL
+NULL  1     1
+NULL  1     2
+NULL  1     3
+NULL  1     NULL
+NULL  2     1
+NULL  2     2
+NULL  3     1
+NULL  3     2
+NULL  3     3
+NULL  3     NULL
+NULL  NULL  1
+NULL  NULL  2
+
+# Note: Result differs from Cockroach but matches Postgres.
+query III colnames
+SELECT * FROM uvw WHERE (u, v, w) >= (1, NULL, 3) ORDER BY u, v, w
+----
+u  v     w
+2  1     1
+2  1     2
+2  1     3
+2  1     NULL
+2  2     1
+2  2     2
+2  2     3
+2  2     NULL
+2  3     1
+2  3     2
+2  3     3
+2  3     NULL
+2  NULL  1
+2  NULL  2
+2  NULL  3
+2  NULL  NULL
+3  1     1
+3  1     2
+3  1     3
+3  1     NULL
+3  2     1
+3  2     2
+3  2     3
+3  2     NULL
+3  3     1
+3  3     2
+3  3     3
+3  3     NULL
+3  NULL  1
+3  NULL  2
+3  NULL  3
+3  NULL  NULL
+
+# Note: Result differs from Cockroach but matches Postgres.
+query III colnames
+SELECT * FROM uvw WHERE (u, v, w) < (2, NULL, 3) ORDER BY u, v, w
+----
+u  v     w
+1  1     1
+1  1     2
+1  1     3
+1  1     NULL
+1  2     1
+1  2     2
+1  2     3
+1  2     NULL
+1  3     1
+1  3     2
+1  3     3
+1  3     NULL
+1  NULL  1
+1  NULL  2
+1  NULL  3
+1  NULL  NULL
+
+statement ok
+DROP TABLE uvw
+
+subtest tuple_placeholders
+
+# TODO(benesch): support the statement form of PREPARE and EXECUTE.
+#
+# statement ok
+# PREPARE x AS SELECT $1 = (1,2) AS r FROM tb
+#
+# statement ok
+# PREPARE y AS SELECT (1,2) = $1 AS r FROM tb
+#
+# query B colnames
+# EXECUTE x((1,2))
+# ----
+# r
+# true
+#
+# query B colnames
+# EXECUTE y((1,2))
+# ----
+# r
+# true
+#
+# query error expected EXECUTE parameter expression to have type tuple\{int, int\}, but '\(1, 2, 3\)' has type tuple\{int, int, int\}
+# EXECUTE x((1,2,3))
+
+# NOTE(benesch): many tests related to a CockroachDB extension called "labeled
+# tuples" were removed from this test file. The labeled tuple extension looks
+# like a bad hack to work around CockroachDB's missing support for true
+# composite types, and I do not expect us to ever support it.
+
+statement ok
+CREATE TABLE t (a int, b string)
+
+statement ok
+INSERT INTO t VALUES (1, 'one'), (2, 'two')
+
+query IT
+  SELECT (x).f1, (x).f2
+    FROM (SELECT (ROW(a, b)) AS x FROM t)
+ORDER BY 1
+   LIMIT 1
+----
+1 one
+
+query IT colnames
+SELECT (t.*).* FROM t ORDER BY 1,2
+----
+a  b
+1  one
+2  two
+
+query I colnames rowsort
+SELECT (t).a FROM t
+----
+a
+1
+2
+
+query B
+SELECT (1, 2, 3) IS NULL AS r
+----
+false
+
+query error Expected an expression, found right parenthesis
+SELECT () = ()

@@ -1,0 +1,81 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+mode cockroach
+
+statement ok
+CREATE TABLE data (input text)
+
+statement ok
+INSERT INTO data VALUES ('asdfjkl'), ('foo'), ('asdf'), (NULL), ('jkl')
+
+query TTT
+SELECT data.*, reg.* FROM data, regexp_extract('(asdf)|(?P<foo>jkl)', data.input) reg ORDER BY data.input
+----
+asdf asdf NULL
+asdfjkl asdf NULL
+jkl NULL jkl
+
+# TODO - Test that the columns have the correct nullability, once they actually do (#1685)
+
+# Standard regex matching.
+query TTT
+SELECT 'foo' ~ 'foo?', 'fo' ~ 'foo?', 'f' ~ 'foo?'
+----
+true  true  false
+
+# Standard regex not-matching.
+query TTT
+SELECT 'foo' !~ 'foo?', 'fo' !~ 'foo?', 'f' !~ 'foo?'
+----
+false  false  true
+
+# Case-insensitive matching.
+query TT
+SELECT 'Foo' ~ 'foo', 'Foo' ~* 'foo'
+----
+false  true
+
+# Case-insensitive not-matching.
+query TT
+SELECT 'Foo' !~ 'foo', 'Foo' !~* 'foo'
+----
+true  false
+
+mode standard
+
+# Check that literal regexes are pre-compiled...
+query T multiline
+EXPLAIN PLAN FOR SELECT input ~ 'foo?' FROM data
+----
+Source materialize.public.data (u1):
+| Project (#0)
+
+Query:
+%0 =
+| Get materialize.public.data (u1)
+| Map "foo?" ~(#0)
+| Project (#1)
+
+EOF
+
+# ...but not variable regexes.
+query T multiline
+EXPLAIN PLAN FOR SELECT input ~ input FROM data
+----
+Source materialize.public.data (u1):
+| Project (#0)
+
+Query:
+%0 =
+| Get materialize.public.data (u1)
+| Map (#0 ~ #0)
+| Project (#1)
+
+EOF

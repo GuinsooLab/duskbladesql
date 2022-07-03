@@ -1,0 +1,387 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+mode cockroach
+
+statement ok
+CREATE TABLE bools (b text)
+
+statement ok
+INSERT INTO bools VALUES
+    ('t'), ('tr'), ('tR'), ('tRuE'), ('TRUE'), ('    tr    '),
+    ('f'), ('fa'), ('faL'), ('fAlsE'), ('FALSE'), ('           fal '),
+    ('on'), ('off'), ('On'), ('Off'), ('ON'), ('oFf'),
+    ('1'), ('0'), ('               1'), ('0        ')
+
+query TB rowsort
+SELECT replace(b, ' ', 'x'), b::bool FROM bools
+----
+xxxxxxxxxxxxxxx1  true
+xxxxxxxxxxxfalx   false
+xxxxtrxxxx        true
+0xxxxxxxx         false
+0                 false
+1                 true
+f                 false
+fa                false
+faL               false
+fAlsE             false
+FALSE             false
+off               false
+oFf               false
+Off               false
+on                true
+On                true
+ON                true
+t                 true
+tr                true
+tR                true
+tRuE              true
+TRUE              true
+
+query error invalid input syntax for type boolean: "blah"
+SELECT 'blah'::bool
+
+query error NOT argument must have type boolean, not type integer
+SELECT NOT 1
+
+query error AND argument must have type boolean, not type integer
+SELECT 1 AND 1
+
+query error OR argument must have type boolean, not type integer
+SELECT 1 OR 1
+
+query error OR argument must have type boolean, not type integer
+SELECT 1 OR FALSE
+
+query error OR argument must have type boolean, not type integer
+SELECT FALSE OR 1
+
+query error AND argument must have type boolean, not type integer
+SELECT 1 AND FALSE
+
+query error AND argument must have type boolean, not type integer
+SELECT FALSE AND 1
+
+query B colnames
+SELECT TRUE
+----
+bool
+true
+
+query B colnames
+SELECT FALSE
+----
+bool
+false
+
+query B
+SELECT NOT TRUE
+----
+false
+
+query B
+SELECT NOT FALSE
+----
+true
+
+query B
+SELECT TRUE AND FALSE
+----
+false
+
+query B
+SELECT TRUE AND TRUE
+----
+true
+
+query B
+SELECT FALSE AND FALSE
+----
+false
+
+query B
+SELECT TRUE AND NULL
+----
+NULL
+
+query B
+SELECT NULL AND TRUE
+----
+NULL
+
+query B
+SELECT FALSE AND null
+----
+false
+
+query B
+SELECT NULL AND FALSE
+----
+false
+
+query B
+SELECT TRUE OR FALSE
+----
+true
+
+query B
+SELECT TRUE OR TRUE
+----
+true
+
+query B
+SELECT FALSE OR FALSE
+----
+false
+
+query B
+SELECT TRUE OR NULL
+----
+true
+
+query B
+SELECT NULL OR TRUE
+----
+true
+
+query B
+SELECT FALSE OR null
+----
+NULL
+
+query B
+SELECT NULL OR FALSE
+----
+NULL
+
+query B
+SELECT TRUE AND NOT TRUE
+----
+false
+
+query B
+SELECT NOT FALSE OR FALSE
+----
+true
+
+### integer to bool ###
+
+query B
+SELECT 99::int::bool
+----
+true
+
+query B
+SELECT 0::int::bool
+----
+false
+
+query B
+SELECT NOT 0::int::bool
+----
+true
+
+### int8 to bool ###
+
+query B
+SELECT 99::bigint::bool
+----
+true
+
+query B
+SELECT 0::bigint::bool
+----
+false
+
+query B
+SELECT NOT 0::bigint::bool
+----
+true
+
+### bool to integer ###
+
+query I
+SELECT true::int
+----
+1
+
+query I
+SELECT false::int
+----
+0
+
+statement ok
+CREATE TABLE x (a int, u int, j jsonb, b bool)
+
+# Ensure the NOT gets pushed into the binary operation.
+query T multiline
+EXPLAIN PLAN FOR SELECT
+  NOT(a = u),
+  NOT(a != u),
+  NOT(a < u),
+  NOT(a > u),
+  NOT(a >= u),
+  NOT(a <= u),
+  NOT(NOT(b)),
+  -- Doesn't have a negation.
+  NOT(j @> '{}'::JSONB)
+FROM x
+----
+Source materialize.public.x (u2):
+| Project (#0..=#3)
+
+Query:
+%0 =
+| Get materialize.public.x (u2)
+| Map (#0 != #1), (#0 = #1), (#0 >= #1), (#0 <= #1), (#0 < #1), (#0 > #1), !((#2 @> {}))
+| Project (#4..=#9, #3, #10)
+
+EOF
+
+statement ok
+CREATE TABLE y (a boolean, b bool)
+
+# Bypass if statements with identical branches
+query T multiline
+EXPLAIN PLAN FOR SELECT
+  CASE WHEN b THEN a ELSE a END
+FROM y
+----
+Source materialize.public.y (u3):
+| Project (#0)
+
+Query:
+%0 =
+| Get materialize.public.y (u3)
+| Project (#0)
+
+EOF
+
+# Bypass if statements with identical branches
+query T multiline
+EXPLAIN PLAN FOR SELECT
+  CASE WHEN b THEN NULL ELSE true END
+FROM y
+----
+Source materialize.public.y (u3):
+| Project (#1)
+
+Query:
+%0 =
+| Get materialize.public.y (u3)
+| Map (null || (!(#1) || isnull(#1)))
+| Project (#2)
+
+EOF
+
+
+# Bypass if statements with identical branches
+query T multiline
+EXPLAIN PLAN FOR SELECT
+  CASE WHEN b THEN NULL ELSE false END
+FROM y
+----
+Source materialize.public.y (u3):
+| Project (#1)
+
+Query:
+%0 =
+| Get materialize.public.y (u3)
+| Map (null && (#1 && !(isnull(#1))))
+| Project (#2)
+
+EOF
+
+
+query T multiline
+EXPLAIN PLAN FOR SELECT
+  CASE WHEN b THEN true ELSE NULL END
+FROM y
+----
+Source materialize.public.y (u3):
+| Project (#1)
+
+Query:
+%0 =
+| Get materialize.public.y (u3)
+| Map (null || (#1 && !(isnull(#1))))
+| Project (#2)
+
+EOF
+
+
+query T multiline
+EXPLAIN PLAN FOR SELECT
+  CASE WHEN b THEN false ELSE NULL END
+FROM y
+----
+Source materialize.public.y (u3):
+| Project (#1)
+
+Query:
+%0 =
+| Get materialize.public.y (u3)
+| Map (null && (!(#1) || isnull(#1)))
+| Project (#2)
+
+EOF
+
+query T multiline
+EXPLAIN PLAN FOR SELECT
+  CASE WHEN b THEN false ELSE TRUE END
+FROM y
+----
+Source materialize.public.y (u3):
+| Project (#1)
+
+Query:
+%0 =
+| Get materialize.public.y (u3)
+| Map (!(#1) || isnull(#1))
+| Project (#2)
+
+EOF
+
+statement ok
+CREATE TABLE z (a int, b int)
+
+statement ok
+insert into z values (null, null), (1, null), (null, 2), (1, 2), (2, 1)
+
+query T multiline
+EXPLAIN PLAN FOR SELECT *
+FROM z
+WHERE CASE WHEN a > b THEN FALSE ELSE TRUE END
+----
+Source materialize.public.z (u4):
+| Filter ((isnull(#0) || isnull(#1)) || (#0 <= #1))
+| Project (#0, #1)
+
+Query:
+%0 =
+| Get materialize.public.z (u4)
+| Filter ((isnull(#0) || isnull(#1)) || (#0 <= #1))
+
+EOF
+
+query II
+SELECT *
+FROM z
+WHERE CASE WHEN a > b THEN FALSE ELSE TRUE END
+----
+NULL  NULL
+NULL  2
+1  NULL
+1  2
+
+query T
+SELECT CASE WHEN FALSE THEN 'short_string'::char(20) ELSE 'long_string_long_string'::char(30) END
+----
+long_string_long_string

@@ -1,0 +1,142 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/collatedstring_uniqueindex2
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+# not supported yet
+halt
+
+mode cockroach
+
+##
+# Test a primary key with a collated string in second position (cannot get a key range).
+#
+# German collation chart: http://www.unicode.org/cldr/charts/30/collation/de.html
+
+statement ok
+CREATE TABLE t (
+  a STRING COLLATE de,
+  b INT,
+  c BOOL,
+  PRIMARY KEY (b, a)
+)
+
+statement ok
+INSERT INTO t VALUES
+  ('A' COLLATE de, 1, TRUE),
+  ('A' COLLATE de, 2, NULL),
+  ('a' COLLATE de, 2, FALSE),
+  ('a' COLLATE de, 3, TRUE),
+  ('B' COLLATE de, 3, NULL),
+  ('b' COLLATE de, 4, FALSE),
+  ('ü' COLLATE de, 6, TRUE),
+  ('ü' COLLATE de, 5, NULL),
+  ('x' COLLATE de, 5, FALSE)
+
+statement ok
+CREATE UNIQUE INDEX ON t (a, b)
+
+query TI
+SELECT a, b FROM t ORDER BY a, b
+----
+a  2
+a  3
+A  1
+A  2
+b  4
+B  3
+ü  5
+ü  6
+x  5
+
+query IT
+SELECT b, a FROM t ORDER BY b, a
+----
+1  A
+2  a
+2  A
+3  a
+3  B
+4  b
+5  ü
+5  x
+6  ü
+
+query I
+SELECT COUNT (a) FROM t WHERE a = ('a' COLLATE de)
+----
+2
+
+query I
+SELECT COUNT (a) FROM t WHERE a = ('y' COLLATE de)
+----
+0
+
+query I
+SELECT COUNT (a) FROM t WHERE a > ('a' COLLATE de) AND a < ('c' COLLATE de)
+----
+4
+
+# Update and try again.
+
+statement ok
+UPDATE t SET a = (a :: STRING || a :: STRING) COLLATE de
+
+query TI
+SELECT a, b FROM t ORDER BY a, b
+----
+aa  2
+aa  3
+AA  1
+AA  2
+bb  4
+BB  3
+üü  5
+üü  6
+xx  5
+
+query IT
+SELECT b, a FROM t ORDER BY b, a
+----
+1  AA
+2  aa
+2  AA
+3  aa
+3  BB
+4  bb
+5  üü
+5  xx
+6  üü
+
+# Delete and try again
+
+statement ok
+DELETE FROM t WHERE a > ('a' COLLATE de) AND a < ('c' COLLATE de)
+
+query TI
+SELECT a, b FROM t ORDER BY a, b
+----
+üü  5
+üü  6
+xx  5
+
+query IT
+SELECT b, a FROM t ORDER BY b, a
+----
+5  üü
+5  xx
+6  üü

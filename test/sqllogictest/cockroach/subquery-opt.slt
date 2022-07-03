@@ -1,0 +1,45 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/subquery-opt
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+mode cockroach
+
+# Regression test for #37263. This test is broken in the heuristic planner
+# because it does not correctly type check subqueries.
+query B
+SELECT 3::decimal IN (SELECT 1)
+----
+false
+
+query error unsupported comparison operator
+SELECT 3::decimal IN (SELECT 1::int)
+
+query B
+SELECT 1 IN (SELECT '1');
+----
+true
+
+# Regression test for #14554.
+query ITIIIII
+SELECT t.oid, t.typname, t.typsend, t.typreceive, t.typoutput, t.typinput, t.typelem
+	FROM pg_type AS t
+	WHERE t.oid NOT IN (
+	  SELECT (ARRAY[704,11676,10005,3912,11765,59410,11397])[i]
+	  FROM generate_series(1, 376) AS i
+	)
+----

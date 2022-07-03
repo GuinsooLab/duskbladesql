@@ -1,0 +1,59 @@
+{{/*  Converts data/sql_funcs.yml into table. */}}
+{{ range $.Site.Data.sql_funcs }}
+
+{{ if not (isset $.Params 0) }}
+
+<h3 id="{{ lower .type | replaceRE "[^a-zA-Z0-9]+" "-" }}-func">
+  {{.type}}
+</h3>
+
+<p>{{ if .description }} {{ .description | $.Page.RenderString }} {{ end }}</p>
+
+{{end}}
+
+{{ if or (eq ($.Get 0) .type) (not (isset $.Params 0)) }}
+
+<table>
+  <tr>
+    <th>
+      Function
+    </th>
+    <th>
+      Computes
+    </th>
+  </tr>
+  {{ range .functions }}
+  <tr>
+    {{/*  Extract the function's name from its signature and use it as the ID
+          to facilitate deeplinking. The `docsearch_l4` class is a special
+          class that is scraped by our Algolia DocSearch configuration.  */}}
+    <td class="docsearch_l4" id="{{ index (split .signature "(") 0 | urlize }}">
+      {{/*  We use clojure highlighting simply because it looks best with the
+      components we want to highlight. In the future, this should be customized
+      in some way.  */}}
+      {{ highlight .signature "clojure" "" }}
+    </td>
+    <td>
+
+      {{ .description | $.Page.RenderString }}
+
+      {{ if .url }}(<a href="{{ .url }}">docs</a>){{ end }}
+
+      {{ if .unmaterializable }}
+        <br><br><b>Note:</b> This function is <a href="#unmaterializable-functions">unmaterializable</a>.
+      {{ end }}
+    </td>
+  </tr>
+  {{ end }} {{/*  {{ range .functions }} */}}
+</table>
+
+{{end}}
+
+{{ end }}{{/*  {{ range $.Site.Data.sql_funcs }} */}}
+
+{{/*  When someone is deeplinked to a td on the page, highlight the tr  */}}
+<script type="text/javascript">
+  $(function() {
+    $(location.hash).parents('tr').css('background-color', '#FFFF5522');
+  });
+</script>

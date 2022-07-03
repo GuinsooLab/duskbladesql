@@ -1,0 +1,76 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/values
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+mode cockroach
+
+# Tests for the implicit one row, zero column values operator.
+query I
+SELECT 1
+----
+1
+
+query I
+SELECT 1 + 2
+----
+3
+
+query III colnames
+VALUES (1, 2, 3), (4, 5, 6)
+----
+column1 column2 column3
+1       2       3
+4       5       6
+
+query I
+VALUES (length('a')), (1 + length('a')), (length('abc')), (length('ab') * 2)
+----
+1
+2
+3
+4
+
+query I
+SELECT a + b FROM (VALUES (1, 2), (3, 4), (5, 6)) AS v(a, b)
+----
+3
+7
+11
+
+query error pgcode 42601 VALUES expression has varying number of columns: 2 vs 1
+VALUES (1), (2, 3)
+
+query I
+VALUES (1), (1), (2), (3) ORDER BY 1 DESC LIMIT 3
+----
+3
+2
+1
+
+query error pgcode 42703 column "z" does not exist
+VALUES (1), (1), (2), (3) ORDER BY z
+
+# subqueries can be evaluated in VALUES
+query I
+VALUES ((SELECT 1)), ((SELECT 2))
+----
+1
+2
+
+query error pgcode 42804 invalid input syntax for type integer
+VALUES (NULL, 1), (2, NULL), (NULL, 'a')

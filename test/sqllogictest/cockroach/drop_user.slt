@@ -1,0 +1,170 @@
+# Copyright 2015 - 2019 The Cockroach Authors. All rights reserved.
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+#
+# This file is derived from the logic test suite in CockroachDB. The
+# original file was retrieved on June 10, 2019 from:
+#
+#     https://github.com/cockroachdb/cockroach/blob/d2f7fbf5dd1fc1a099bbad790a2e1f7c60a66cc3/pkg/sql/logictest/testdata/logic_test/drop_user
+#
+# The original source code is subject to the terms of the Apache
+# 2.0 license, a copy of which can be found in the LICENSE file at the
+# root of this repository.
+
+# not supported yet
+halt
+
+mode cockroach
+
+statement ok
+CREATE USER user1
+
+query T colnames
+SHOW USERS
+----
+user_name
+root
+testuser
+user1
+
+statement ok
+DROP USER user1
+
+query T colnames
+SHOW USERS
+----
+user_name
+root
+testuser
+
+statement ok
+CREATE USER user1
+
+query T colnames
+SHOW USERS
+----
+user_name
+root
+testuser
+user1
+
+statement ok
+DROP USER USEr1
+
+query T colnames
+SHOW USERS
+----
+user_name
+root
+testuser
+
+statement error user user1 does not exist
+DROP USER user1
+
+statement error user user1 does not exist
+DROP USER usER1
+
+statement ok
+DROP USER IF EXISTS user1
+
+statement error username "node" reserved
+DROP USER node
+
+statement error pq: username "foo☂" invalid; usernames are case insensitive, must start with a letter or underscore, may contain letters, digits, dashes, or underscores, and must not exceed 63 characters
+DROP USER foo☂
+
+statement ok
+CREATE USER user1
+
+statement ok
+CREATE USER user2
+
+statement ok
+CREATE USER user3
+
+statement ok
+CREATE USER user4
+
+query T colnames
+SHOW USERS
+----
+user_name
+root
+testuser
+user1
+user2
+user3
+user4
+
+statement ok
+DROP USER user1,user2
+
+query T colnames
+SHOW USERS
+----
+user_name
+root
+testuser
+user3
+user4
+
+statement error user user1 does not exist
+DROP USER user1,user3
+
+query T colnames
+SHOW USERS
+----
+user_name
+root
+testuser
+user3
+user4
+
+statement ok
+CREATE USER user1
+
+statement ok
+CREATE TABLE foo(x INT);
+ GRANT SELECT ON foo TO user3;
+ GRANT SELECT ON DATABASE test TO user1
+
+statement error cannot drop users or roles user1, user3: grants still exist on test, test.public.foo
+DROP USER IF EXISTS user1,user3
+
+statement error cannot drop users or roles user1, user3: grants still exist on test
+REVOKE SELECT ON foo FROM user3;
+  DROP USER IF EXISTS user1,user3
+
+statement ok
+REVOKE SELECT ON DATABASE test FROM user1;
+  DROP USER IF EXISTS user1,user3
+
+statement ok
+PREPARE du AS DROP USER $1;
+ EXECUTE du('user4')
+
+query T colnames
+SHOW USERS
+----
+user_name
+root
+testuser
+
+user testuser
+
+statement error pq: user testuser does not have DELETE privilege on relation users
+DROP USER user2
+
+user root
+
+statement error pq: cannot drop user or role root: grants still exist on .*
+DROP USER root
+
+statement error pq: cannot drop user or role admin: grants still exist on .*
+DROP USER admin

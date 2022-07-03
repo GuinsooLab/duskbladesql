@@ -1,0 +1,17 @@
+[package]
+name = "mz-pgrepr"
+description = "Representation of and serialization for PostgreSQL data types."
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.61.0"
+publish = false
+
+[dependencies]
+byteorder = "1.4.3"
+bytes = "1.1.0"
+chrono = { version = "0.4.0", default-features = false, features = ["std"] }
+dec = "0.4.8"
+once_cell = "1.12.0"
+mz-repr = { path = "../repr" }
+postgres-types = { git = "https://github.com/MaterializeInc/rust-postgres", features = ["with-chrono-0_4", "with-uuid-1"] }
+uuid = "1.1.2"

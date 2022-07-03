@@ -1,0 +1,32 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+# Tests that exist primarily to test our sqllogictest runner,
+# rather than Materialize.
+
+statement ok
+CREATE TABLE t (a int)
+
+statement ok
+INSERT INTO t VALUES (1), (2), (3), (4), (5)
+
+# Computing the diff for UPDATEs with WHERE clauses is a bit involved.
+# Check that we do it right.
+
+statement ok
+UPDATE t SET a = a - 1 WHERE a > 3
+
+query I
+SELECT * FROM t ORDER BY a
+----
+1
+2
+3
+3
+4

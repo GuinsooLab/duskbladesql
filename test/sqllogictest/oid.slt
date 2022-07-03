@@ -1,0 +1,71 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+mode cockroach
+
+query T
+SELECT 1::oid::text
+----
+1
+
+query T
+SELECT (-1)::oid
+----
+4294967295
+
+query T
+SELECT (-1)::oid
+----
+4294967295
+
+query error OID out of range
+SELECT 4294967296::oid
+
+query error OID out of range
+SELECT (-1)::int8::oid
+
+query B
+SELECT 1::oid = 2::oid
+----
+false
+
+query B
+SELECT 1::oid < 2::oid
+----
+true
+
+query B
+SELECT (-1)::oid < 2::oid
+----
+false
+
+query B
+SELECT 0::oid < 4294967295::oid
+----
+true
+
+query B
+SELECT 1 <= 2::oid
+----
+true
+
+query B
+SELECT 1::oid > 2
+----
+false
+
+query B
+SELECT 1::oid >= 2
+----
+false
+
+query B
+SELECT 1::oid != 2::oid
+----
+true

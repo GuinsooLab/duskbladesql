@@ -1,0 +1,1952 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+statement ok
+CREATE TABLE nation (
+    n_nationkey  integer PRIMARY KEY,
+    n_name       char(25) NOT NULL,
+    n_regionkey  integer NOT NULL,
+    n_comment    varchar(152)
+)
+
+statement ok
+CREATE INDEX fk_nation_regionkey ON nation (n_regionkey ASC)
+
+statement ok
+CREATE TABLE region  (
+    r_regionkey  integer PRIMARY KEY,
+    r_name       char(25) NOT NULL,
+    r_comment    varchar(152)
+)
+
+statement ok
+CREATE TABLE part (
+    p_partkey     integer PRIMARY KEY,
+    p_name        varchar(55) NOT NULL,
+    p_mfgr        char(25) NOT NULL,
+    p_brand       char(10) NOT NULL,
+    p_type        varchar(25) NOT NULL,
+    p_size        integer NOT NULL,
+    p_container   char(10) NOT NULL,
+    p_retailprice decimal(15, 2) NOT NULL,
+    p_comment     varchar(23) NOT NULL
+)
+
+statement ok
+CREATE TABLE supplier (
+    s_suppkey     integer PRIMARY KEY,
+    s_name        char(25) NOT NULL,
+    s_address     varchar(40) NOT NULL,
+    s_nationkey   integer NOT NULL,
+    s_phone       char(15) NOT NULL,
+    s_acctbal     decimal(15, 2) NOT NULL,
+    s_comment     varchar(101) NOT NULL
+)
+
+statement ok
+CREATE INDEX fk_supplier_nationkey ON supplier (s_nationkey ASC)
+
+statement ok
+CREATE TABLE partsupp (
+    ps_partkey     integer NOT NULL,
+    ps_suppkey     integer NOT NULL,
+    ps_availqty    integer NOT NULL,
+    ps_supplycost  decimal(15, 2) NOT NULL,
+    ps_comment     varchar(199) NOT NULL,
+    PRIMARY KEY (ps_partkey, ps_suppkey)
+)
+
+statement ok
+CREATE INDEX fk_partsupp_partkey ON partsupp (ps_partkey ASC)
+
+statement ok
+CREATE INDEX fk_partsupp_suppkey ON partsupp (ps_suppkey ASC)
+
+statement ok
+CREATE TABLE customer (
+    c_custkey     integer PRIMARY KEY,
+    c_name        varchar(25) NOT NULL,
+    c_address     varchar(40) NOT NULL,
+    c_nationkey   integer NOT NULL,
+    c_phone       char(15) NOT NULL,
+    c_acctbal     decimal(15, 2) NOT NULL,
+    c_mktsegment  char(10) NOT NULL,
+    c_comment     varchar(117) NOT NULL
+)
+
+statement ok
+CREATE INDEX fk_customer_nationkey ON customer (c_nationkey ASC)
+
+statement ok
+CREATE TABLE orders (
+    o_orderkey       integer PRIMARY KEY,
+    o_custkey        integer NOT NULL,
+    o_orderstatus    char(1) NOT NULL,
+    o_totalprice     decimal(15, 2) NOT NULL,
+    o_orderdate      DATE NOT NULL,
+    o_orderpriority  char(15) NOT NULL,
+    o_clerk          char(15) NOT NULL,
+    o_shippriority   integer NOT NULL,
+    o_comment        varchar(79) NOT NULL
+)
+
+statement ok
+CREATE INDEX fk_orders_custkey ON orders (o_custkey ASC)
+
+statement ok
+CREATE TABLE lineitem (
+    l_orderkey       integer NOT NULL,
+    l_partkey        integer NOT NULL,
+    l_suppkey        integer NOT NULL,
+    l_linenumber     integer NOT NULL,
+    l_quantity       decimal(15, 2) NOT NULL,
+    l_extendedprice  decimal(15, 2) NOT NULL,
+    l_discount       decimal(15, 2) NOT NULL,
+    l_tax            decimal(15, 2) NOT NULL,
+    l_returnflag     char(1) NOT NULL,
+    l_linestatus     char(1) NOT NULL,
+    l_shipdate       date NOT NULL,
+    l_commitdate     date NOT NULL,
+    l_receiptdate    date NOT NULL,
+    l_shipinstruct   char(25) NOT NULL,
+    l_shipmode       char(10) NOT NULL,
+    l_comment        varchar(44) NOT NULL,
+    PRIMARY KEY (l_orderkey, l_linenumber)
+)
+
+statement ok
+CREATE INDEX fk_lineitem_orderkey ON lineitem (l_orderkey ASC)
+
+statement ok
+CREATE INDEX fk_lineitem_partkey ON lineitem (l_partkey ASC)
+
+statement ok
+CREATE INDEX fk_lineitem_suppkey ON lineitem (l_suppkey ASC)
+
+statement ok
+CREATE INDEX fk_lineitem_partsuppkey ON lineitem (l_partkey ASC, l_suppkey ASC)
+
+
+
+query T multiline
+-- Query 01
+EXPLAIN PLAN FOR SELECT
+	l_returnflag,
+	l_linestatus,
+	sum(l_quantity) AS sum_qty,
+	sum(l_extendedprice) AS sum_base_price,
+	sum(l_extendedprice * (1 - l_discount)) AS sum_disc_price,
+	sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) AS sum_charge,
+	avg(l_quantity) AS avg_qty,
+	avg(l_extendedprice) AS avg_price,
+	avg(l_discount) AS avg_disc,
+	count(*) AS count_order
+FROM
+	lineitem
+WHERE
+	l_shipdate <= DATE '1998-12-01' -- - INTERVAL '60' day (fails with an error)
+GROUP BY
+	l_returnflag,
+	l_linestatus
+ORDER BY
+	l_returnflag,
+	l_linestatus
+----
+%0 =
+| Get materialize.public.lineitem (u14)
+| Filter (#10 <= 1998-12-01)
+| Project (#4..=#9)
+| Reduce group=(#4, #5)
+| | agg sum(#0)
+| | agg sum(#1)
+| | agg sum((#1 * (1 - #2)))
+| | agg sum(((#1 * (1 - #2)) * (1 + #3)))
+| | agg count(true)
+| | agg sum(#2)
+| Map i64tof64(if (#6 = 0) then {null} else {#6}), (numerictof64(#2) / #8), (numerictof64(#3) / #8), (numerictof64(#7) / #8)
+| Project (#0..=#5, #9..=#11, #6)
+
+Finish order_by=(#0 asc nulls_last, #1 asc nulls_last) limit=none offset=0 project=(#0..=#9)
+
+EOF
+
+
+query T multiline
+-- Query 02
+EXPLAIN PLAN FOR SELECT
+    s_acctbal,
+    s_name,
+    n_name,
+    p_partkey,
+    p_mfgr,
+    s_address,
+    s_phone,
+    s_comment
+FROM
+    part, supplier, partsupp, nation, region
+WHERE
+    p_partkey = ps_partkey
+    AND s_suppkey = ps_suppkey
+    AND p_size = CAST (15 AS smallint)
+    AND p_type LIKE '%BRASS'
+    AND s_nationkey = n_nationkey
+    AND n_regionkey = r_regionkey
+    AND r_name = 'EUROPE'
+    AND ps_supplycost
+        = (
+                SELECT
+                    min(ps_supplycost)
+                FROM
+                    partsupp, supplier, nation, region
+                WHERE
+                    p_partkey = ps_partkey
+                    AND s_suppkey = ps_suppkey
+                    AND s_nationkey = n_nationkey
+                    AND n_regionkey = r_regionkey
+                    AND r_name = 'EUROPE'
+            )
+ORDER BY
+    s_acctbal DESC, n_name, s_name, p_partkey
+----
+Source materialize.public.region (u3):
+| Filter (#1 = "EUROPE")
+| Project (#0, #1)
+
+Source materialize.public.part (u4):
+| Filter "%BRASS" ~~(varchartostr(#4)), (#5 = 15)
+| Project (#0, #2, #4, #5)
+
+Query:
+%0 = Let l0 =
+| Get materialize.public.partsupp (u7)
+| ArrangeBy (#0)
+
+%1 = Let l1 =
+| Get materialize.public.region (u3)
+| Filter (#1 = "EUROPE")
+| Project (#0)
+| ArrangeBy (#0)
+
+%2 =
+| Get materialize.public.part (u4)
+| Filter (#5 = 15), "%BRASS" ~~(varchartostr(#4))
+| Project (#0, #2)
+| ArrangeBy (#0)
+
+%3 =
+| Get materialize.public.supplier (u5)
+| ArrangeBy (#0)
+
+%4 =
+| Get materialize.public.nation (u1)
+| Project (#0..=#2)
+| ArrangeBy (#0)
+
+%5 = Let l2 =
+| Join %2 %3 %0 %4 %1 (= #0 #9) (= #2 #10) (= #5 #14) (= #16 #17)
+| | implementation = Differential %0.(#0) %2.(#0) %3.(#0) %4.(#0) %1.(#0)
+| Project (#0, #1, #3, #4, #6..=#8, #12, #15)
+
+%6 =
+| Get %5 (l2)
+| Project (#0)
+| Distinct group=(#0)
+| ArrangeBy (#0)
+
+%7 =
+| Get materialize.public.supplier (u5)
+| Project (#0, #3)
+| ArrangeBy (#0)
+
+%8 =
+| Get materialize.public.nation (u1)
+| Project (#0, #2)
+| ArrangeBy (#0)
+
+%9 =
+| Join %6 %0 %7 %8 %1 (= #0 #1) (= #2 #6) (= #7 #8) (= #9 #10)
+| | implementation = Differential %0.(#0) %6.(#0) %7.(#0) %8.(#0) %1.(#0)
+| Project (#0, #4)
+| Reduce group=(#0)
+| | agg min(#1)
+| ArrangeBy (#0, #1)
+
+%10 =
+| Join %5 %9 (= #0 #9) (= #7 #10)
+| | implementation = Differential %5 %9.(#0, #1)
+| Project (#5, #2, #8, #0, #1, #3, #4, #6)
+
+Finish order_by=(#0 desc nulls_first, #2 asc nulls_last, #1 asc nulls_last, #3 asc nulls_last) limit=none offset=0 project=(#0..=#7)
+
+EOF
+
+
+query T multiline
+-- Query 03
+EXPLAIN PLAN FOR SELECT
+    l_orderkey,
+    sum(l_extendedprice * (1 - l_discount)) AS revenue,
+    o_orderdate,
+    o_shippriority
+FROM
+    customer,
+    orders,
+    lineitem
+WHERE
+    c_mktsegment = 'BUILDING'
+    AND c_custkey = o_custkey
+    AND l_orderkey = o_orderkey
+    AND o_orderdate < DATE '1995-03-15'
+    AND l_shipdate > DATE '1995-03-15'
+GROUP BY
+    l_orderkey,
+    o_orderdate,
+    o_shippriority
+ORDER BY
+    revenue DESC,
+    o_orderdate
+----
+%0 =
+| Get materialize.public.customer (u10)
+| Filter (#6 = "BUILDING")
+| Project (#0)
+| ArrangeBy (#0)
+
+%1 =
+| Get materialize.public.orders (u12)
+| Filter (#4 < 1995-03-15)
+| Project (#0, #1, #4, #7)
+| ArrangeBy (#0)
+
+%2 =
+| Get materialize.public.lineitem (u14)
+| ArrangeBy (#0)
+
+%3 =
+| Join %0 %1 %2 (= #0 #2) (= #1 #5)
+| | implementation = Differential %2.(#0) %1.(#0) %0.(#0)
+| Filter (#15 > 1995-03-15)
+| Project (#1, #3, #4, #10, #11)
+| Reduce group=(#0, #1, #2)
+| | agg sum((#3 * (1 - #4)))
+| Project (#0, #3, #1, #2)
+
+Finish order_by=(#1 desc nulls_first, #2 asc nulls_last) limit=none offset=0 project=(#0..=#3)
+
+EOF
+
+
+query T multiline
+-- Query 04
+EXPLAIN PLAN FOR SELECT
+    o_orderpriority,
+    count(*) AS order_count
+FROM
+    orders
+WHERE
+    o_orderdate >= DATE '1993-07-01'
+    AND o_orderdate < DATE '1993-07-01' + INTERVAL '3' month
+    AND EXISTS (
+        SELECT
+            *
+        FROM
+            lineitem
+        WHERE
+            l_orderkey = o_orderkey
+            AND l_commitdate < l_receiptdate
+    )
+GROUP BY
+    o_orderpriority
+ORDER BY
+    o_orderpriority
+----
+%0 =
+| Get materialize.public.orders (u12)
+| Filter (#4 >= 1993-07-01), (datetots(#4) < 1993-10-01 00:00:00)
+| Project (#0, #5)
+
+%1 =
+| Get materialize.public.lineitem (u14)
+| Filter (#11 < #12)
+| Project (#0)
+| Distinct group=(#0)
+| ArrangeBy (#0)
+
+%2 =
+| Join %0 %1 (= #0 #2)
+| | implementation = Differential %0 %1.(#0)
+| Project (#1)
+| Reduce group=(#0)
+| | agg count(true)
+
+Finish order_by=(#0 asc nulls_last) limit=none offset=0 project=(#0, #1)
+
+EOF
+
+
+query T multiline
+-- Query 05
+EXPLAIN PLAN FOR SELECT
+    n_name,
+    sum(l_extendedprice * (1 - l_discount)) AS revenue
+FROM
+    customer,
+    orders,
+    lineitem,
+    supplier,
+    nation,
+    region
+WHERE
+    c_custkey = o_custkey
+    AND l_orderkey = o_orderkey
+    AND l_suppkey = s_suppkey
+    AND c_nationkey = s_nationkey
+    AND s_nationkey = n_nationkey
+    AND n_regionkey = r_regionkey
+    AND r_name = 'ASIA'
+    AND o_orderdate >= DATE '1994-01-01'
+    AND o_orderdate < DATE '1995-01-01'
+GROUP BY
+    n_name
+ORDER BY
+    revenue DESC
+----
+Source materialize.public.region (u3):
+| Filter (#1 = "ASIA")
+| Project (#0, #1)
+
+Query:
+%0 =
+| Get materialize.public.customer (u10)
+| Project (#0, #3)
+| ArrangeBy (#0)
+
+%1 =
+| Get materialize.public.orders (u12)
+| Filter (#4 < 1995-01-01), (#4 >= 1994-01-01)
+| Project (#0, #1)
+| ArrangeBy (#0)
+
+%2 =
+| Get materialize.public.lineitem (u14)
+| ArrangeBy (#0)
+
+%3 =
+| Get materialize.public.supplier (u5)
+| Project (#0, #3)
+| ArrangeBy (#0, #1)
+
+%4 =
+| Get materialize.public.nation (u1)
+| Project (#0..=#2)
+| ArrangeBy (#0)
+
+%5 =
+| Get materialize.public.region (u3)
+| Filter (#1 = "ASIA")
+| Project (#0)
+| ArrangeBy (#0)
+
+%6 =
+| Join %0 %1 %2 %3 %4 %5 (= #0 #3) (= #1 #21 #22) (= #2 #4) (= #6 #20) (= #24 #25)
+| | implementation = Differential %2.(#0) %1.(#0) %0.(#0) %3.(#0, #1) %4.(#0) %5.(#0)
+| Project (#9, #10, #23)
+| Reduce group=(#2)
+| | agg sum((#0 * (1 - #1)))
+
+Finish order_by=(#1 desc nulls_first) limit=none offset=0 project=(#0, #1)
+
+EOF
+
+
+query T multiline
+-- Query 06
+EXPLAIN PLAN FOR SELECT
+    sum(l_extendedprice * l_discount) AS revenue
+FROM
+    lineitem
+WHERE
+    l_quantity < 24
+    AND l_shipdate >= DATE '1994-01-01'
+    AND l_shipdate < DATE '1994-01-01' + INTERVAL '1' year
+    AND l_discount BETWEEN 0.06 - 0.01 AND 0.07
+----
+%0 = Let l0 =
+| Get materialize.public.lineitem (u14)
+| Filter (#4 < 24), (#6 <= 0.07), (#6 >= 0.05), (#10 >= 1994-01-01), (datetots(#10) < 1995-01-01 00:00:00)
+| Project (#5, #6)
+| Reduce group=()
+| | agg sum((#0 * #1))
+
+%1 =
+| Get %0 (l0)
+| Project ()
+| Negate
+
+%2 =
+| Constant ()
+
+%3 =
+| Union %1 %2
+| Map null
+
+%4 =
+| Union %0 %3
+
+EOF
+
+
+query T multiline
+-- Query 07
+EXPLAIN PLAN FOR SELECT
+    supp_nation,
+    cust_nation,
+    l_year,
+    sum(volume) AS revenue
+FROM
+    (
+        SELECT
+            n1.n_name AS supp_nation,
+            n2.n_name AS cust_nation,
+            extract(year FROM l_shipdate) AS l_year,
+            l_extendedprice * (1 - l_discount) AS volume
+        FROM
+            supplier,
+            lineitem,
+            orders,
+            customer,
+            nation n1,
+            nation n2
+        WHERE
+            s_suppkey = l_suppkey
+            AND o_orderkey = l_orderkey
+            AND c_custkey = o_custkey
+            AND s_nationkey = n1.n_nationkey
+            AND c_nationkey = n2.n_nationkey
+            AND (
+                (n1.n_name = 'FRANCE' AND n2.n_name = 'GERMANY')
+                or (n1.n_name = 'GERMANY' AND n2.n_name = 'FRANCE')
+            )
+            AND l_shipdate BETWEEN DATE '1995-01-01' AND DATE '1996-12-31'
+    ) AS shipping
+GROUP BY
+    supp_nation,
+    cust_nation,
+    l_year
+ORDER BY
+    supp_nation,
+    cust_nation,
+    l_year
+----
+%0 = Let l0 =
+| Get materialize.public.nation (u1)
+| Project (#0, #1)
+| ArrangeBy (#0)
+
+%1 =
+| Get materialize.public.supplier (u5)
+| Project (#0, #3)
+| ArrangeBy (#0)
+
+%2 =
+| Get materialize.public.lineitem (u14)
+| ArrangeBy (#2)
+
+%3 =
+| Get materialize.public.orders (u12)
+| Project (#0, #1)
+| ArrangeBy (#0)
+
+%4 =
+| Get materialize.public.customer (u10)
+| Project (#0, #3)
+| ArrangeBy (#0)
+
+%5 =
+| Join %1 %2 %3 %4 %0 %0 (= #0 #4) (= #1 #22) (= #2 #18) (= #19 #20) (= #21 #24)
+| | implementation = Differential %2.(#2) %1.(#0) %3.(#0) %4.(#0) %0.(#0) %0.(#0)
+| Filter (#12 <= 1996-12-31), (#12 >= 1995-01-01), (((#23 = "FRANCE") && (#25 = "GERMANY")) || ((#23 = "GERMANY") && (#25 = "FRANCE")))
+| Project (#7, #8, #12, #23, #25)
+| Reduce group=(#3, #4, extract_year_d(#2))
+| | agg sum((#0 * (1 - #1)))
+
+Finish order_by=(#0 asc nulls_last, #1 asc nulls_last, #2 asc nulls_last) limit=none offset=0 project=(#0..=#3)
+
+EOF
+
+
+query T multiline
+-- Query 08
+EXPLAIN PLAN FOR SELECT
+    o_year,
+    sum(case
+        when nation = 'BRAZIL' then volume
+        else 0
+    end) / sum(volume) AS mkt_share
+FROM
+    (
+        SELECT
+            extract(year FROM o_orderdate) AS o_year,
+            l_extendedprice * (1 - l_discount) AS volume,
+            n2.n_name AS nation
+        FROM
+            part,
+            supplier,
+            lineitem,
+            orders,
+            customer,
+            nation n1,
+            nation n2,
+            region
+        WHERE
+            p_partkey = l_partkey
+            AND s_suppkey = l_suppkey
+            AND l_orderkey = o_orderkey
+            AND o_custkey = c_custkey
+            AND c_nationkey = n1.n_nationkey
+            AND n1.n_regionkey = r_regionkey
+            AND r_name = 'AMERICA'
+            AND s_nationkey = n2.n_nationkey
+            AND o_orderdate BETWEEN DATE '1995-01-01' AND DATE '1996-12-31'
+            AND p_type = 'ECONOMY ANODIZED STEEL'
+    ) AS all_nations
+GROUP BY
+    o_year
+ORDER BY
+    o_year
+----
+Source materialize.public.region (u3):
+| Filter (#1 = "AMERICA")
+| Project (#0, #1)
+
+Source materialize.public.part (u4):
+| Filter ("ECONOMY ANODIZED STEEL" = varchartostr(#4))
+| Project (#0, #4)
+
+Query:
+%0 =
+| Get materialize.public.part (u4)
+| Filter ("ECONOMY ANODIZED STEEL" = varchartostr(#4))
+| Project (#0)
+| ArrangeBy (#0)
+
+%1 =
+| Get materialize.public.supplier (u5)
+| Project (#0, #3)
+| ArrangeBy (#0)
+
+%2 =
+| Get materialize.public.lineitem (u14)
+| ArrangeBy (#1)
+
+%3 =
+| Get materialize.public.orders (u12)
+| Filter (#4 <= 1996-12-31), (#4 >= 1995-01-01)
+| Project (#0, #1, #4)
+| ArrangeBy (#0)
+
+%4 =
+| Get materialize.public.customer (u10)
+| Project (#0, #3)
+| ArrangeBy (#0)
+
+%5 =
+| Get materialize.public.nation (u1)
+| Project (#0, #2)
+| ArrangeBy (#0)
+
+%6 =
+| Get materialize.public.nation (u1)
+| Project (#0, #1)
+| ArrangeBy (#0)
+
+%7 =
+| Get materialize.public.region (u3)
+| Filter (#1 = "AMERICA")
+| Project (#0)
+| ArrangeBy (#0)
+
+%8 =
+| Join %0 %1 %2 %3 %4 %5 %6 %7 (= #0 #4) (= #1 #5) (= #2 #26) (= #3 #19) (= #20 #22) (= #23 #24) (= #25 #28)
+| | implementation = Differential %2.(#1) %0.(#0) %1.(#0) %3.(#0) %4.(#0) %5.(#0) %6.(#0) %7.(#0)
+| Project (#8, #9, #21, #27)
+| Reduce group=(extract_year_d(#2))
+| | agg sum(if (#3 = "BRAZIL") then {(#0 * (1 - #1))} else {0})
+| | agg sum((#0 * (1 - #1)))
+| Map (#1 / #2)
+| Project (#0, #3)
+
+Finish order_by=(#0 asc nulls_last) limit=none offset=0 project=(#0, #1)
+
+EOF
+
+
+query T multiline
+-- Query 09
+EXPLAIN PLAN FOR SELECT
+    nation,
+    o_year,
+    sum(amount) AS sum_profit
+FROM
+    (
+        SELECT
+            n_name AS nation,
+            extract(year FROM o_orderdate) AS o_year,
+            l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity AS amount
+        FROM
+            part,
+            supplier,
+            lineitem,
+            partsupp,
+            orders,
+            nation
+        WHERE
+            s_suppkey = l_suppkey
+            AND ps_suppkey = l_suppkey
+            AND ps_partkey = l_partkey
+            AND p_partkey = l_partkey
+            AND o_orderkey = l_orderkey
+            AND s_nationkey = n_nationkey
+            AND p_name like '%green%'
+    ) AS profit
+GROUP BY
+    nation,
+    o_year
+ORDER BY
+    nation,
+    o_year DESC
+----
+Source materialize.public.part (u4):
+| Filter "%green%" ~~(varchartostr(#1))
+| Project (#0, #1)
+
+Query:
+%0 =
+| Get materialize.public.part (u4)
+| Filter "%green%" ~~(varchartostr(#1))
+| Project (#0)
+| ArrangeBy (#0)
+
+%1 =
+| Get materialize.public.supplier (u5)
+| Project (#0, #3)
+| ArrangeBy (#0)
+
+%2 =
+| Get materialize.public.lineitem (u14)
+| ArrangeBy (#1, #2)
+
+%3 =
+| Get materialize.public.partsupp (u7)
+| Project (#0, #1, #3)
+| ArrangeBy (#0, #1)
+
+%4 =
+| Get materialize.public.orders (u12)
+| Project (#0, #4)
+| ArrangeBy (#0)
+
+%5 =
+| Get materialize.public.nation (u1)
+| Project (#0, #1)
+| ArrangeBy (#0)
+
+%6 =
+| Join %0 %1 %2 %3 %4 %5 (= #0 #4 #19) (= #1 #5 #20) (= #2 #24) (= #3 #22)
+| | implementation = Differential %2.(#1, #2) %3.(#0, #1) %0.(#0) %1.(#0) %4.(#0) %5.(#0)
+| Project (#7..=#9, #21, #23, #25)
+| Reduce group=(#5, extract_year_d(#4))
+| | agg sum(((#1 * (1 - #2)) - (#3 * #0)))
+
+Finish order_by=(#0 asc nulls_last, #1 desc nulls_first) limit=none offset=0 project=(#0..=#2)
+
+EOF
+
+
+query T multiline
+-- Query 10
+EXPLAIN PLAN FOR SELECT
+    c_custkey,
+    c_name,
+    sum(l_extendedprice * (1 - l_discount)) AS revenue,
+    c_acctbal,
+    n_name,
+    c_address,
+    c_phone,
+    c_comment
+FROM
+    customer,
+    orders,
+    lineitem,
+    nation
+WHERE
+    c_custkey = o_custkey
+    AND l_orderkey = o_orderkey
+    AND o_orderdate >= DATE '1993-10-01'
+    AND o_orderdate < DATE '1994-01-01'
+    AND o_orderdate < DATE '1993-10-01' + INTERVAL '3' month
+    AND l_returnflag = 'R'
+    AND c_nationkey = n_nationkey
+GROUP BY
+    c_custkey,
+    c_name,
+    c_acctbal,
+    c_phone,
+    n_name,
+    c_address,
+    c_comment
+ORDER BY
+    revenue DESC
+----
+%0 =
+| Get materialize.public.customer (u10)
+| Project (#0..=#5, #7)
+| ArrangeBy (#0)
+
+%1 =
+| Get materialize.public.orders (u12)
+| Filter (#4 < 1994-01-01), (#4 >= 1993-10-01), (datetots(#4) < 1994-01-01 00:00:00)
+| Project (#0, #1)
+| ArrangeBy (#0)
+
+%2 =
+| Get materialize.public.lineitem (u14)
+| ArrangeBy (#0)
+
+%3 =
+| Get materialize.public.nation (u1)
+| Project (#0, #1)
+| ArrangeBy (#0)
+
+%4 =
+| Join %0 %1 %2 %3 (= #0 #8) (= #3 #25) (= #7 #9)
+| | implementation = Differential %2.(#0) %1.(#0) %0.(#0) %3.(#0)
+| Filter (#17 = "R")
+| Project (#0..=#2, #4..=#6, #14, #15, #26)
+| Reduce group=(#0, #1, #4, #3, #8, #2, #5)
+| | agg sum((#6 * (1 - #7)))
+| Project (#0, #1, #7, #2, #4, #5, #3, #6)
+
+Finish order_by=(#2 desc nulls_first) limit=none offset=0 project=(#0..=#7)
+
+EOF
+
+
+query T multiline
+-- Query 11
+EXPLAIN PLAN FOR SELECT
+    ps_partkey,
+    sum(ps_supplycost * ps_availqty) AS value
+FROM
+    partsupp,
+    supplier,
+    nation
+WHERE
+    ps_suppkey = s_suppkey
+    AND s_nationkey = n_nationkey
+    AND n_name = 'GERMANY'
+GROUP BY
+    ps_partkey having
+        sum(ps_supplycost * ps_availqty) > (
+            SELECT
+                sum(ps_supplycost * ps_availqty) * 0.0001
+            FROM
+                partsupp,
+                supplier,
+                nation
+            WHERE
+                ps_suppkey = s_suppkey
+                AND s_nationkey = n_nationkey
+                AND n_name = 'GERMANY'
+        )
+ORDER BY
+    value DESC
+----
+%0 =
+| Get materialize.public.partsupp (u7)
+| ArrangeBy (#1)
+
+%1 =
+| Get materialize.public.supplier (u5)
+| Project (#0, #3)
+| ArrangeBy (#0)
+
+%2 =
+| Get materialize.public.nation (u1)
+| Filter (#1 = "GERMANY")
+| Project (#0)
+| ArrangeBy (#0)
+
+%3 = Let l0 =
+| Join %0 %1 %2 (= #1 #5) (= #6 #7)
+| | implementation = Differential %0.(#1) %1.(#0) %2.(#0)
+| Project (#0, #2, #3)
+
+%4 =
+| Get %3 (l0)
+| Reduce group=(#0)
+| | agg sum((#2 * i32tonumeric(#1)))
+
+%5 =
+| Get %3 (l0)
+| Project (#1, #2)
+| Reduce group=()
+| | agg sum((#1 * i32tonumeric(#0)))
+| ArrangeBy ()
+
+%6 =
+| Join %4 %5
+| | implementation = Differential %4 %5.()
+| Filter (#1 > (#2 * 0.0001))
+| Project (#0, #1)
+
+Finish order_by=(#1 desc nulls_first) limit=none offset=0 project=(#0, #1)
+
+EOF
+
+
+query T multiline
+-- Query 12
+EXPLAIN PLAN FOR SELECT
+    l_shipmode,
+    sum(case
+        when o_orderpriority = '1-URGENT'
+            or o_orderpriority = '2-HIGH'
+            then 1
+        else 0
+    end) AS high_line_count,
+    sum(case
+        when o_orderpriority <> '1-URGENT'
+            AND o_orderpriority <> '2-HIGH'
+            then 1
+        else 0
+    end) AS low_line_count
+FROM
+    orders,
+    lineitem
+WHERE
+    o_orderkey = l_orderkey
+    AND l_shipmode IN ('MAIL', 'SHIP')
+    AND l_commitdate < l_receiptdate
+    AND l_shipdate < l_commitdate
+    AND l_receiptdate >= DATE '1994-01-01'
+    AND l_receiptdate < DATE '1994-01-01' + INTERVAL '1' year
+GROUP BY
+    l_shipmode
+ORDER BY
+    l_shipmode
+----
+%0 =
+| Get materialize.public.orders (u12)
+| Project (#0, #5)
+| ArrangeBy (#0)
+
+%1 =
+| Get materialize.public.lineitem (u14)
+| ArrangeBy (#0)
+
+%2 =
+| Join %0 %1 (= #0 #2)
+| | implementation = DeltaQuery
+| |   delta %0 %1.(#0)
+| |   delta %1 %0.(#0)
+| Filter (#14 >= 1994-01-01), (#12 < #13), (#13 < #14), (datetots(#14) < 1995-01-01 00:00:00), ((#16 = "MAIL") || (#16 = "SHIP"))
+| Project (#1, #16)
+| Reduce group=(#1)
+| | agg sum(if ((#0 = "2-HIGH") || (#0 = "1-URGENT")) then {1} else {0})
+| | agg sum(if ((#0 != "2-HIGH") && (#0 != "1-URGENT")) then {1} else {0})
+
+Finish order_by=(#0 asc nulls_last) limit=none offset=0 project=(#0..=#2)
+
+EOF
+
+
+query T multiline
+-- Query 13
+EXPLAIN PLAN FOR SELECT
+    c_count,
+    count(*) AS custdist
+FROM
+    (
+        SELECT
+            c_custkey,
+            count(o_orderkey) c_count -- workaround for no column aliases
+        FROM
+            customer LEFT OUTER JOIN orders ON
+                c_custkey = o_custkey
+                AND o_comment NOT LIKE '%special%requests%'
+        GROUP BY
+            c_custkey
+    ) AS c_orders -- (c_custkey, c_count) -- no column aliases yet
+GROUP BY
+    c_count
+ORDER BY
+    custdist DESC,
+    c_count DESC
+----
+%0 =
+| Get materialize.public.customer (u10)
+| ArrangeBy (#0)
+
+%1 =
+| Get materialize.public.orders (u12)
+| ArrangeBy (#1)
+
+%2 = Let l0 =
+| Join %0 %1 (= #0 #9)
+| | implementation = DeltaQuery
+| |   delta %0 %1.(#1)
+| |   delta %1 %0.(#0)
+| Filter !("%special%requests%" ~~(varchartostr(#16)))
+| Project (#0..=#8)
+
+%3 =
+| Get %2 (l0)
+| Project (#0, #8)
+
+%4 =
+| Get %2 (l0)
+| Project (#0..=#7)
+| Distinct group=(#0, #1, #2, #3, #4, #5, #6, #7)
+| Project (#0)
+| Negate
+
+%5 =
+| Get materialize.public.customer (u10)
+| Project (#0)
+
+%6 =
+| Union %4 %5
+| Map null
+
+%7 =
+| Union %3 %6
+| Reduce group=(#0)
+| | agg count(#1)
+| Project (#1)
+| Reduce group=(#0)
+| | agg count(true)
+
+Finish order_by=(#1 desc nulls_first, #0 desc nulls_first) limit=none offset=0 project=(#0, #1)
+
+EOF
+
+
+query T multiline
+-- Query 14
+EXPLAIN PLAN FOR SELECT
+    100.00 * sum(case
+        when p_type like 'PROMO%'
+            then l_extendedprice * (1 - l_discount)
+        else 0
+    end) / sum(l_extendedprice * (1 - l_discount)) AS promo_revenue
+FROM
+    lineitem,
+    part
+WHERE
+    l_partkey = p_partkey
+    AND l_shipdate >= DATE '1995-09-01'
+    AND l_shipdate < DATE '1995-09-01' + INTERVAL '1' month
+----
+Source materialize.public.part (u4):
+| Project (#0, #4)
+
+Query:
+%0 =
+| Get materialize.public.lineitem (u14)
+| ArrangeBy (#1)
+
+%1 =
+| Get materialize.public.part (u4)
+| Project (#0, #4)
+| ArrangeBy (#0)
+
+%2 = Let l0 =
+| Join %0 %1 (= #1 #16)
+| | implementation = DeltaQuery
+| |   delta %0 %1.(#0)
+| |   delta %1 %0.(#1)
+| Filter (#10 >= 1995-09-01), (datetots(#10) < 1995-10-01 00:00:00)
+| Project (#5, #6, #17)
+| Reduce group=()
+| | agg sum(if "PROMO%" ~~(varchartostr(#2)) then {(#0 * (1 - #1))} else {0})
+| | agg sum((#0 * (1 - #1)))
+
+%3 =
+| Get %2 (l0)
+| Project ()
+| Negate
+
+%4 =
+| Constant ()
+
+%5 =
+| Union %3 %4
+| Map null, null
+
+%6 =
+| Union %2 %5
+| Map ((100 * #0) / #1)
+| Project (#2)
+
+EOF
+
+
+statement ok
+create view revenue (supplier_no, total_revenue) as
+    SELECT
+        l_suppkey,
+        sum(l_extendedprice * (1 - l_discount))
+    FROM
+        lineitem
+    WHERE
+        l_shipdate >= DATE '1996-01-01'
+        AND l_shipdate < DATE '1996-01-01' + INTERVAL '3' month
+    GROUP BY
+        l_suppkey
+
+query T multiline
+-- Query 15
+EXPLAIN PLAN FOR SELECT
+    s_suppkey,
+    s_name,
+    s_address,
+    s_phone,
+    total_revenue
+FROM
+    supplier,
+    revenue
+WHERE
+    s_suppkey = supplier_no
+    AND total_revenue = (
+        SELECT
+            max(total_revenue)
+        FROM
+            revenue
+    )
+ORDER BY
+    s_suppkey
+----
+%0 = Let l0 =
+| Get materialize.public.lineitem (u14)
+| Filter (#10 >= 1996-01-01), (datetots(#10) < 1996-04-01 00:00:00)
+| Project (#2, #5, #6)
+| Reduce group=(#0)
+| | agg sum((#1 * (1 - #2)))
+
+%1 =
+| Get materialize.public.supplier (u5)
+| Project (#0..=#2, #4)
+
+%2 =
+| Get %0 (l0)
+| ArrangeBy (#0)
+
+%3 =
+| Get %0 (l0)
+| Project (#1)
+| Reduce group=()
+| | agg max(#0)
+| ArrangeBy (#0)
+
+%4 =
+| Join %1 %2 %3 (= #0 #4) (= #5 #6)
+| | implementation = Differential %1 %2.(#0) %3.(#0)
+| Project (#0..=#3, #5)
+
+Finish order_by=(#0 asc nulls_last) limit=none offset=0 project=(#0..=#4)
+
+EOF
+
+statement ok
+drop view revenue
+
+
+query T multiline
+-- Query 16
+EXPLAIN PLAN FOR SELECT
+    p_brand,
+    p_type,
+    p_size,
+    count(DISTINCT ps_suppkey) AS supplier_cnt
+FROM
+    partsupp,
+    part
+WHERE
+    p_partkey = ps_partkey
+    AND p_brand <> 'Brand#45'
+    AND p_type NOT LIKE 'MEDIUM POLISHED%'
+    AND p_size IN (49, 14, 23, 45, 19, 3, 36, 9)
+    AND ps_suppkey NOT IN (
+        SELECT
+            s_suppkey
+        FROM
+            supplier
+        WHERE
+            s_comment like '%Customer%Complaints%'
+    )
+GROUP BY
+    p_brand,
+    p_type,
+    p_size
+ORDER BY
+    supplier_cnt DESC,
+    p_brand,
+    p_type,
+    p_size
+----
+Source materialize.public.part (u4):
+| Filter !("MEDIUM POLISHED%" ~~(varchartostr(#4))), ((((((((#5 = 14) || (#5 = 49)) || (#5 = 23)) || (#5 = 45)) || (#5 = 19)) || (#5 = 3)) || (#5 = 36)) || (#5 = 9)), (#3 != "Brand#45")
+| Project (#0, #3..=#5)
+
+Query:
+%0 =
+| Get materialize.public.partsupp (u7)
+| ArrangeBy (#0)
+
+%1 =
+| Get materialize.public.part (u4)
+| Filter (#3 != "Brand#45"), !("MEDIUM POLISHED%" ~~(varchartostr(#4))), ((((((((#5 = 14) || (#5 = 49)) || (#5 = 23)) || (#5 = 45)) || (#5 = 19)) || (#5 = 3)) || (#5 = 36)) || (#5 = 9))
+| Project (#0, #3..=#5)
+| ArrangeBy (#0)
+
+%2 = Let l0 =
+| Join %0 %1 (= #0 #5)
+| | implementation = DeltaQuery
+| |   delta %0 %1.(#0)
+| |   delta %1 %0.(#0)
+| Project (#1, #6..=#8)
+
+%3 = Let l1 =
+| Get %2 (l0)
+| Project (#0)
+| Distinct group=(#0)
+
+%4 =
+| Get %2 (l0)
+| ArrangeBy (#0)
+
+%5 =
+| Get %3 (l1)
+| ArrangeBy (#0)
+
+%6 =
+| Get materialize.public.supplier (u5)
+| Filter "%Customer%Complaints%" ~~(varchartostr(#6))
+| Project (#0)
+
+%7 =
+| Join %5 %6 (= #0 #1)
+| | implementation = Differential %6 %5.(#0)
+| Project (#0)
+| Negate
+
+%8 =
+| Union %7 %3
+
+%9 =
+| Join %4 %8 (= #0 #4)
+| | implementation = Differential %8 %4.(#0)
+| Project (#0..=#3)
+| Reduce group=(#1, #2, #3)
+| | agg count(distinct #0)
+
+Finish order_by=(#3 desc nulls_first, #0 asc nulls_last, #1 asc nulls_last, #2 asc nulls_last) limit=none offset=0 project=(#0..=#3)
+
+EOF
+
+
+query T multiline
+-- Query 17
+EXPLAIN PLAN FOR SELECT
+  sum(l_extendedprice) / 7.0 AS avg_yearly
+FROM
+  lineitem,
+  part
+WHERE
+  p_partkey = l_partkey
+  AND p_brand = 'Brand#23'
+  AND p_container = 'MED BOX'
+  AND l_quantity < (
+    SELECT
+      0.2 * avg(l_quantity)
+    FROM
+      lineitem
+    WHERE
+      l_partkey = p_partkey
+  )
+----
+Source materialize.public.part (u4):
+| Filter (#3 = "Brand#23"), (#6 = "MED BOX")
+| Project (#0, #3, #6)
+
+Query:
+%0 = Let l0 =
+| Get materialize.public.lineitem (u14)
+| ArrangeBy (#1)
+
+%1 =
+| Get materialize.public.part (u4)
+| Filter (#3 = "Brand#23"), (#6 = "MED BOX")
+| Project (#0)
+| ArrangeBy (#0)
+
+%2 = Let l1 =
+| Join %0 %1 (= #1 #16)
+| | implementation = DeltaQuery
+| |   delta %0 %1.(#0)
+| |   delta %1 %0.(#1)
+| Project (#1, #4, #5)
+
+%3 =
+| Get %2 (l1)
+| Project (#0)
+| Distinct group=(#0)
+| ArrangeBy (#0)
+
+%4 =
+| Join %3 %0 (= #0 #2)
+| | implementation = DeltaQuery
+| |   delta %3 %0.(#1)
+| |   delta %0 %3.(#0)
+| Project (#0, #5)
+| Reduce group=(#0)
+| | agg sum(#1)
+| | agg count(true)
+| ArrangeBy (#0)
+
+%5 = Let l2 =
+| Join %2 %4 (= #0 #3)
+| | implementation = Differential %2 %4.(#0)
+| Filter (numerictof64(#1) < (0.2 * (numerictof64(#4) / i64tof64(if (#5 = 0) then {null} else {#5}))))
+| Project (#2)
+| Reduce group=()
+| | agg sum(#0)
+
+%6 =
+| Get %5 (l2)
+| Project ()
+| Negate
+
+%7 =
+| Constant ()
+
+%8 =
+| Union %6 %7
+| Map null
+
+%9 =
+| Union %5 %8
+| Map (#0 / 7)
+| Project (#1)
+
+EOF
+
+
+query T multiline
+-- Query 18
+EXPLAIN PLAN FOR SELECT
+    c_name,
+    c_custkey,
+    o_orderkey,
+    o_orderdate,
+    o_totalprice,
+    sum(l_quantity)
+FROM
+    customer,
+    orders,
+    lineitem
+WHERE
+    o_orderkey IN (
+        SELECT
+            l_orderkey
+        FROM
+            lineitem
+        GROUP BY
+            l_orderkey having
+                sum(l_quantity) > 300
+    )
+    AND c_custkey = o_custkey
+    AND o_orderkey = l_orderkey
+GROUP BY
+    c_name,
+    c_custkey,
+    o_orderkey,
+    o_orderdate,
+    o_totalprice
+ORDER BY
+    o_totalprice DESC,
+    o_orderdate
+----
+%0 = Let l0 =
+| Get materialize.public.lineitem (u14)
+| ArrangeBy (#0)
+
+%1 =
+| Get materialize.public.customer (u10)
+| Project (#0, #1)
+| ArrangeBy (#0)
+
+%2 =
+| Get materialize.public.orders (u12)
+| Project (#0, #1, #3, #4)
+| ArrangeBy (#0)
+
+%3 = Let l1 =
+| Join %1 %2 %0 (= #0 #3) (= #2 #6)
+| | implementation = Differential %0.(#0) %2.(#0) %1.(#0)
+| Project (#0..=#2, #4, #5, #10)
+
+%4 =
+| Get %3 (l1)
+| Project (#2)
+| Distinct group=(#0)
+| ArrangeBy (#0)
+
+%5 =
+| Join %4 %0 (= #0 #1)
+| | implementation = DeltaQuery
+| |   delta %4 %0.(#0)
+| |   delta %0 %4.(#0)
+| Project (#0, #5)
+| Reduce group=(#0)
+| | agg sum(#1)
+| ArrangeBy (#0)
+
+%6 =
+| Join %3 %5 (= #2 #6)
+| | implementation = Differential %3 %5.(#0)
+| Filter (#7 > 300)
+| Project (#0..=#5)
+| Reduce group=(#1, #0, #2, #4, #3)
+| | agg sum(#5)
+
+Finish order_by=(#4 desc nulls_first, #3 asc nulls_last) limit=none offset=0 project=(#0..=#5)
+
+EOF
+
+
+query T multiline
+-- Query 19
+EXPLAIN PLAN FOR SELECT
+    sum(l_extendedprice* (1 - l_discount)) AS revenue
+FROM
+    lineitem,
+    part
+WHERE
+    (
+        p_partkey = l_partkey
+        AND p_brand = 'Brand#12'
+        AND p_container IN ('SM CASE', 'SM BOX', 'SM PACK', 'SM PKG')
+        AND l_quantity >= CAST (1 AS smallint) AND l_quantity <= CAST (1 + 10 AS smallint)
+        AND p_size BETWEEN CAST (1 AS smallint) AND CAST (5 AS smallint)
+        AND l_shipmode IN ('AIR', 'AIR REG')
+        AND l_shipinstruct = 'DELIVER IN PERSON'
+    )
+    or
+    (
+        p_partkey = l_partkey
+        AND p_brand = 'Brand#23'
+        AND p_container IN ('MED BAG', 'MED BOX', 'MED PKG', 'MED PACK')
+        AND l_quantity >= CAST (10 AS smallint) AND l_quantity <= CAST (10 + 10 AS smallint)
+        AND p_size BETWEEN CAST (1 AS smallint) AND CAST (10 AS smallint)
+        AND l_shipmode IN ('AIR', 'AIR REG')
+        AND l_shipinstruct = 'DELIVER IN PERSON'
+    )
+    or
+    (
+        p_partkey = l_partkey
+        AND p_brand = 'Brand#34'
+        AND p_container IN ('LG CASE', 'LG BOX', 'LG PACK', 'LG PKG')
+        AND l_quantity >= CAST (20 AS smallint) AND l_quantity <= CAST (20 + 10 AS smallint)
+        AND p_size BETWEEN CAST (1 AS smallint) AND CAST (15 AS smallint)
+        AND l_shipmode IN ('AIR', 'AIR REG')
+        AND l_shipinstruct = 'DELIVER IN PERSON'
+    )
+----
+Source materialize.public.part (u4):
+| Filter (#5 >= 1)
+| Project (#0, #3, #5, #6)
+
+Query:
+%0 =
+| Get materialize.public.lineitem (u14)
+| ArrangeBy (#1)
+
+%1 =
+| Get materialize.public.part (u4)
+| Filter (#5 >= 1)
+| Project (#0, #3, #5, #6)
+| ArrangeBy (#0)
+
+%2 = Let l0 =
+| Join %0 %1 (= #1 #16)
+| | implementation = DeltaQuery
+| |   delta %0 %1.(#0)
+| |   delta %1 %0.(#1)
+| Filter (#13 = "DELIVER IN PERSON"), ((#14 = "AIR") || (#14 = "AIR REG")), (((((((((#19 = "LG BOX") || (#19 = "LG CASE")) || (#19 = "LG PACK")) || (#19 = "LG PKG")) && (#17 = "Brand#34")) && (#4 >= 20)) && (#4 <= 30)) && (#18 <= 15)) || (((((((((#19 = "SM BOX") || (#19 = "SM CASE")) || (#19 = "SM PACK")) || (#19 = "SM PKG")) && (#17 = "Brand#12")) && (#4 >= 1)) && (#4 <= 11)) && (#18 <= 5)) || ((((((((#19 = "MED BAG") || (#19 = "MED BOX")) || (#19 = "MED PKG")) || (#19 = "MED PACK")) && (#17 = "Brand#23")) && (#4 >= 10)) && (#4 <= 20)) && (#18 <= 10))))
+| Project (#5, #6)
+| Reduce group=()
+| | agg sum((#0 * (1 - #1)))
+
+%3 =
+| Get %2 (l0)
+| Project ()
+| Negate
+
+%4 =
+| Constant ()
+
+%5 =
+| Union %3 %4
+| Map null
+
+%6 =
+| Union %2 %5
+
+EOF
+
+
+query T multiline
+-- Query 20
+EXPLAIN PLAN FOR SELECT
+    s_name,
+    s_address
+FROM
+    supplier,
+    nation
+WHERE
+    s_suppkey IN (
+        SELECT
+            ps_suppkey
+        FROM
+            partsupp
+        WHERE
+            ps_partkey IN (
+                SELECT
+                    p_partkey
+                FROM
+                    part
+                WHERE
+                    p_name like 'forest%'
+            )
+            AND ps_availqty > (
+                SELECT
+                    0.5 * sum(l_quantity)
+                FROM
+                    lineitem
+                WHERE
+                    l_partkey = ps_partkey
+                    AND l_suppkey = ps_suppkey
+                    AND l_shipdate >= DATE '1995-01-01'
+                    AND l_shipdate < DATE '1995-01-01' + INTERVAL '1' year
+            )
+    )
+    AND s_nationkey = n_nationkey
+    AND n_name = 'CANADA'
+ORDER BY
+    s_name
+----
+Source materialize.public.part (u4):
+| Filter "forest%" ~~(varchartostr(#1))
+| Project (#0, #1)
+
+Query:
+%0 =
+| Get materialize.public.supplier (u5)
+| ArrangeBy (#3)
+
+%1 =
+| Get materialize.public.nation (u1)
+| Filter (#1 = "CANADA")
+| Project (#0)
+| ArrangeBy (#0)
+
+%2 = Let l0 =
+| Join %0 %1 (= #3 #7)
+| | implementation = DeltaQuery
+| |   delta %0 %1.(#0)
+| |   delta %1 %0.(#3)
+| Project (#0..=#2)
+
+%3 =
+| Get %2 (l0)
+| Project (#0)
+| ArrangeBy ()
+
+%4 =
+| Get materialize.public.partsupp (u7)
+| ArrangeBy (#0)
+
+%5 =
+| Get materialize.public.part (u4)
+| Filter "forest%" ~~(varchartostr(#1))
+| Project (#0)
+| ArrangeBy (#0)
+
+%6 = Let l1 =
+| Join %3 %4 %5 (= #1 #6)
+| | implementation = Differential %4.(#0) %5.(#0) %3.()
+| Project (#0..=#3)
+
+%7 =
+| Get %6 (l1)
+| Filter (#0 = #2)
+| Project (#0, #1, #3)
+
+%8 =
+| Get %6 (l1)
+| Project (#1, #2)
+| Distinct group=(#0, #1)
+| ArrangeBy (#0, #1)
+
+%9 =
+| Get materialize.public.lineitem (u14)
+| ArrangeBy (#1, #2)
+
+%10 =
+| Join %8 %9 (= #0 #3) (= #1 #4)
+| | implementation = DeltaQuery
+| |   delta %8 %9.(#1, #2)
+| |   delta %9 %8.(#0, #1)
+| Filter (#12 >= 1995-01-01), (datetots(#12) < 1996-01-01 00:00:00)
+| Project (#0, #1, #6)
+| Reduce group=(#0, #1)
+| | agg sum(#2)
+| ArrangeBy (#0, #1)
+
+%11 =
+| Join %7 %10 (= #0 #4) (= #1 #3)
+| | implementation = Differential %7 %10.(#0, #1)
+| Filter (i32tonumeric(#2) > (0.5 * #5))
+| Project (#0)
+| Distinct group=(#0)
+| ArrangeBy (#0)
+
+%12 =
+| Join %2 %11 (= #0 #3)
+| | implementation = Differential %2 %11.(#0)
+| Project (#1, #2)
+
+Finish order_by=(#0 asc nulls_last) limit=none offset=0 project=(#0, #1)
+
+EOF
+
+
+query T multiline
+-- Query 21
+EXPLAIN PLAN FOR SELECT
+    s_name,
+    count(*) AS numwait
+FROM
+    supplier,
+    lineitem l1,
+    orders,
+    nation
+WHERE
+    s_suppkey = l1.l_suppkey
+    AND o_orderkey = l1.l_orderkey
+    AND o_orderstatus = 'F'
+    AND l1.l_receiptdate > l1.l_commitdate
+    AND EXISTS (
+        SELECT
+            *
+        FROM
+            lineitem l2
+        WHERE
+            l2.l_orderkey = l1.l_orderkey
+            AND l2.l_suppkey <> l1.l_suppkey
+    )
+    AND not EXISTS (
+        SELECT
+            *
+        FROM
+            lineitem l3
+        WHERE
+            l3.l_orderkey = l1.l_orderkey
+            AND l3.l_suppkey <> l1.l_suppkey
+            AND l3.l_receiptdate > l3.l_commitdate
+    )
+    AND s_nationkey = n_nationkey
+    AND n_name = 'SAUDI ARABIA'
+GROUP BY
+    s_name
+ORDER BY
+    numwait DESC,
+    s_name
+----
+%0 =
+| Get materialize.public.supplier (u5)
+| Project (#0, #1, #3)
+| ArrangeBy (#0)
+
+%1 =
+| Get materialize.public.lineitem (u14)
+| ArrangeBy (#2)
+
+%2 =
+| Get materialize.public.orders (u12)
+| Filter (#2 = "F")
+| Project (#0)
+| ArrangeBy (#0)
+
+%3 =
+| Get materialize.public.nation (u1)
+| Filter (#1 = "SAUDI ARABIA")
+| Project (#0)
+| ArrangeBy (#0)
+
+%4 = Let l0 =
+| Join %0 %1 %2 %3 (= #0 #5) (= #2 #20) (= #3 #19)
+| | implementation = Differential %1.(#2) %0.(#0) %2.(#0) %3.(#0)
+| Filter (#15 > #14)
+| Project (#0, #1, #3)
+
+%5 = Let l1 =
+| Get materialize.public.lineitem (u14)
+| ArrangeBy (#0)
+
+%6 =
+| Get %4 (l0)
+| Project (#0, #2)
+| Distinct group=(#1, #0)
+
+%7 =
+| Join %6 %5 (= #0 #2)
+| | implementation = Differential %6 %5.(#0)
+| Filter (#1 != #4)
+| Project (#0, #1)
+| Distinct group=(#0, #1)
+| ArrangeBy (#0, #1)
+
+%8 = Let l2 =
+| Join %4 %7 (= #0 #4) (= #2 #3)
+| | implementation = Differential %4 %7.(#0, #1)
+| Project (#0..=#2)
+
+%9 = Let l3 =
+| Get %8 (l2)
+| Project (#0, #2)
+| Distinct group=(#1, #0)
+
+%10 =
+| Get %8 (l2)
+| ArrangeBy (#0, #2)
+
+%11 =
+| Join %9 %5 (= #0 #2)
+| | implementation = Differential %9 %5.(#0)
+| Filter (#1 != #4), (#14 > #13)
+| Project (#0, #1)
+| Distinct group=(#0, #1)
+| Negate
+
+%12 =
+| Union %11 %9
+
+%13 =
+| Join %10 %12 (= #0 #4) (= #2 #3)
+| | implementation = Differential %12 %10.(#0, #2)
+| Project (#1)
+| Reduce group=(#0)
+| | agg count(true)
+
+Finish order_by=(#1 desc nulls_first, #0 asc nulls_last) limit=none offset=0 project=(#0, #1)
+
+EOF
+
+
+query T multiline
+-- Query 22
+EXPLAIN PLAN FOR SELECT
+    cntrycode,
+    count(*) AS numcust,
+    sum(c_acctbal) AS totacctbal
+FROM
+    (
+        SELECT
+            substring(c_phone, 1, 2) AS cntrycode, c_acctbal
+        FROM
+            customer
+        WHERE
+            substring(c_phone, 1, 2)
+            IN ('13', '31', '23', '29', '30', '18', '17')
+            AND c_acctbal
+                > (
+                        SELECT
+                            avg(c_acctbal)
+                        FROM
+                            customer
+                        WHERE
+                            c_acctbal > 0.00
+                            AND substring(c_phone, 1, 2)
+                                IN (
+                                        '13',
+                                        '31',
+                                        '23',
+                                        '29',
+                                        '30',
+                                        '18',
+                                        '17'
+                                    )
+                    )
+            AND NOT
+                    EXISTS(
+                        SELECT
+                            *
+                        FROM
+                            orders
+                        WHERE
+                            o_custkey = c_custkey
+                    )
+    )
+        AS custsale
+GROUP BY
+    cntrycode
+ORDER BY
+    cntrycode
+----
+%0 =
+| Get materialize.public.customer (u10)
+| Map substr(chartostr(#4), 1, 2)
+| Filter (((((((#8 = "13") || (#8 = "31")) || (#8 = "23")) || (#8 = "29")) || (#8 = "30")) || (#8 = "18")) || (#8 = "17"))
+| Project (#0, #4, #5)
+
+%1 =
+| Get materialize.public.customer (u10)
+| Filter (#5 > 0)
+| Map substr(chartostr(#4), 1, 2)
+| Filter (((((((#8 = "13") || (#8 = "31")) || (#8 = "23")) || (#8 = "29")) || (#8 = "30")) || (#8 = "18")) || (#8 = "17"))
+| Project (#5)
+| Reduce group=()
+| | agg sum(#0)
+| | agg count(true)
+| ArrangeBy ()
+
+%2 = Let l0 =
+| Join %0 %1
+| | implementation = Differential %0 %1.()
+| Filter (numerictof64(#2) > (numerictof64(#3) / i64tof64(if (#4 = 0) then {null} else {#4})))
+| Project (#0..=#2)
+
+%3 = Let l1 =
+| Get %2 (l0)
+| Project (#0)
+
+%4 =
+| Get %2 (l0)
+| ArrangeBy (#0)
+
+%5 =
+| Get materialize.public.orders (u12)
+| Project (#1)
+| Distinct group=(#0)
+| ArrangeBy (#0)
+
+%6 =
+| Join %3 %5 (= #0 #1)
+| | implementation = Differential %3 %5.(#0)
+| Project (#0)
+| Negate
+
+%7 =
+| Union %6 %3
+
+%8 =
+| Join %4 %7 (= #0 #3)
+| | implementation = Differential %7 %4.(#0)
+| Project (#1, #2)
+| Reduce group=(substr(chartostr(#0), 1, 2))
+| | agg count(true)
+| | agg sum(#1)
+
+Finish order_by=(#0 asc nulls_last) limit=none offset=0 project=(#0..=#2)
+
+EOF
+
+################################################################################
+# end of optimized plans - below here is a sampling of other plan info
+################################################################################
+
+query T multiline
+-- Query 20
+EXPLAIN RAW PLAN FOR SELECT
+    s_name,
+    s_address
+FROM
+    supplier,
+    nation
+WHERE
+    s_suppkey IN (
+        SELECT
+            ps_suppkey
+        FROM
+            partsupp
+        WHERE
+            ps_partkey IN (
+                SELECT
+                    p_partkey
+                FROM
+                    part
+                WHERE
+                    p_name like 'forest%'
+            )
+            AND ps_availqty > (
+                SELECT
+                    0.5 * sum(l_quantity)
+                FROM
+                    lineitem
+                WHERE
+                    l_partkey = ps_partkey
+                    AND l_suppkey = ps_suppkey
+                    AND l_shipdate >= DATE '1995-01-01'
+                    AND l_shipdate < DATE '1995-01-01' + INTERVAL '1' year
+            )
+    )
+    AND s_nationkey = n_nationkey
+    AND n_name = 'CANADA'
+ORDER BY
+    s_name
+----
+%0 =
+| Get materialize.public.supplier (u5)
+
+%1 =
+| Get materialize.public.nation (u1)
+
+%2 =
+| InnerJoin %0 %1 on true
+| Filter ((select(%3) && (#3 = #7)) && (#8 = strtochar("CANADA")))
+| |
+| | %3 =
+| | | Get materialize.public.partsupp (u7)
+| | | Filter (select(%4) && (i32tonumeric(#2) > select(%5)))
+| | | |
+| | | | %4 =
+| | | | | Get materialize.public.part (u4)
+| | | | | Filter (varchartostr(#1) like "forest%")
+| | | | | Project (#0)
+| | | | | Reduce group=() any(((#^0 = #0) && true))
+| | | |
+| | | |
+| | | | %5 =
+| | | | | Get materialize.public.lineitem (u14)
+| | | | | Filter ((((#1 = #^0) && (#2 = #^1)) && (#10 >= strtodate("1995-01-01"))) && (datetots(#10) < (strtodate("1995-01-01") + 1 year)))
+| | | | | Reduce group=() sum(#4)
+| | | | | Map (0.5 * #0)
+| | | | | Project (#1)
+| | | |
+| | | Project (#1)
+| | | Reduce group=() any(((#^0 = #0) && true))
+| |
+| Project (#1, #2)
+
+Finish order_by=(#0 asc nulls_last) limit=none offset=0 project=(#0, #1)
+
+EOF
