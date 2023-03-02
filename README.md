@@ -1,11 +1,11 @@
 <div align="right">
-    <img src="assets/guinsoolab-badge.png" width="60" alt="badge">
+    <img src="https://raw.githubusercontent.com/GuinsooLab/glab/main/src/images/guinsoolab-badge.png" height="60" alt="badge">
     <br />
 </div>
 <div align="center">
-    <img src="/assets/duskbladesql.svg" width=120 alt="logo" />
+    <img src="https://raw.githubusercontent.com/GuinsooLab/glab/main/src/images/guinsoolab-duskbladesql.svg" alt="logo" height="100" />
     <br />
-    <small>a streaming database for real-time applications</small>
+    <br />
 </div>
 
 # DuskbladeSQL
